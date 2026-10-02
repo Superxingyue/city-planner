@@ -283,7 +283,18 @@
         <div class="prop-row"><label>线型</label><span>${sel.curve === 'bezier' ? '贝塞尔曲线' : '折线'}</span></div>
         <div class="prop-row"><label>锚点数</label><span>${sel.points ? sel.points.length : 0}</span></div>
       `;
-    } else if (sel.type === 'district' || sel.type === 'block') {
+    } else if (sel.type === 'block') {
+      // 街区：只读信息，不可直接编辑形状
+      const cat = getLandUseByCode(sel.category);
+      const bbox = State.getBBox(sel);
+      const area = bbox ? (bbox.w * bbox.h * Math.pow(State.project.meterPerPixel, 2) / 10000).toFixed(1) : '?';
+      html += `
+        <div class="prop-row"><label>用地</label><span>${cat ? cat.subName : sel.category}</span></div>
+        <div class="prop-row"><label>代码</label><span>${sel.category || '-'}</span></div>
+        <div class="prop-row"><label>面积</label><span>${area} 公顷</span></div>
+        <div class="opt-hint" style="margin-top:8px;">街区由道路/边界自动围合，不可直接编辑。调整周边道路或边界节点可改变街区范围，变动过大时街区将自动清除。</div>
+      `;
+    } else if (sel.type === 'district') {
       const cats = [];
       for (const major of CONFIG.landUseOrder) {
         const cfg = CONFIG.landUse[major];

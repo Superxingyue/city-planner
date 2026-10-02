@@ -268,27 +268,26 @@ const Renderer = (function () {
     ctx.stroke();
   }
 
-  /* ── 地块编号：圆圈内显示用地代码（B1/R2 等） ──── */
+  /* ── 地块编号：正圆内显示用地代码（B1/R2 等），楷体 ──── */
   function drawPlotNumber(ctx, block, zoom) {
     if (!block.category || !block.points) return;
     const center = State.polygonCenter(block.points);
     const label = block.category;
-    const size = Math.max(10, Math.min(16, 12 / Math.max(0.5, zoom)));
-    ctx.font = `${size}px ${CONFIG.fangSong}`;
+    const size = Math.max(7, Math.min(11, 9 / Math.max(0.5, zoom)));
+    ctx.font = `${size}px ${CONFIG.kaiti}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const tw = ctx.measureText(label).width;
-    const rx = tw * 0.7 + size * 0.4;
-    const ry = size * 0.75;
-    // 圆圈
+    const radius = Math.max(tw * 0.65 + 3, size * 0.85);
+    // 正圆
     ctx.beginPath();
-    ctx.ellipse(center.x, center.y, rx, ry, 0, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
     ctx.fill();
     ctx.strokeStyle = '#1a1a1a';
-    ctx.lineWidth = Math.max(0.5, 0.8 / zoom);
+    ctx.lineWidth = Math.max(0.4, 0.6 / zoom);
     ctx.stroke();
-    // 文字
+    // 文字（楷体）
     ctx.fillStyle = '#1a1a1a';
     ctx.fillText(label, center.x, center.y + 0.5);
   }
@@ -372,6 +371,25 @@ const Renderer = (function () {
     if (!entity.points) return;
     const toScreen = p => ({ x: p.x * zoom + panX, y: p.y * zoom + panY });
     const isEdit = editModeRoadId === entity.id;
+
+    // 街区：只画虚线轮廓，不画顶点手柄（不可直接编辑形状）
+    if (entity.type === 'block' && !isEdit) {
+      ctx.save();
+      ctx.translate(panX, panY);
+      ctx.scale(zoom, zoom);
+      ctx.strokeStyle = 'rgba(33, 150, 243, 0.85)';
+      ctx.lineWidth = 1.5 / zoom;
+      ctx.setLineDash([4 / zoom, 3 / zoom]);
+      ctx.beginPath();
+      ctx.moveTo(entity.points[0].x, entity.points[0].y);
+      for (let i = 1; i < entity.points.length; i++) ctx.lineTo(entity.points[i].x, entity.points[i].y);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+      return;
+    }
+
     if (!isEdit) {
       const bbox = State.getBBox(entity);
       if (bbox) {

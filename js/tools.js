@@ -109,6 +109,7 @@ const Tools = (function () {
       name === 'eraser' ? 'cell' :
       name === 'block-clear' ? 'pointer' : 'crosshair';
     toolListeners.forEach(fn => fn(current));
+    Renderer.render();
   }
   function getTool() { return current; }
   function getToolName() { return toolNames[current] || current; }
@@ -124,6 +125,7 @@ const Tools = (function () {
     calibrateStart = null; dragStart = null;
     Renderer.setPreview(null);
     Renderer.setCalibrateLine(null);
+    Renderer.render();
   }
 
   function exitEditMode() {
@@ -133,6 +135,7 @@ const Tools = (function () {
       Renderer.setEditMode(null);
       Renderer.setGuideLine(null);
       Renderer.setPreview(null);
+      Renderer.render();
     }
   }
 
@@ -503,10 +506,12 @@ const Tools = (function () {
 
   function finishRoad() {
     if (!drawing || drawing.points.length < 2) { drawing = null; Renderer.setPreview(null); Renderer.render(); return; }
-    State.addEntity({ type: 'road', level: drawing.level, curve: drawing.curve, name: drawing.name, points: drawing.points.map(p => ({ x: p.x, y: p.y })) });
+    const newRoad = State.addEntity({ type: 'road', level: drawing.level, curve: drawing.curve, name: drawing.name, points: drawing.points.map(p => ({ x: p.x, y: p.y })) });
     drawing = null;
     Renderer.setPreview(null);
     State.trimTJunctions();
+    // 新路可能穿过现有街区，触发自动适应
+    refreshAdjacentBlocks(newRoad);
     Renderer.render();
   }
 
@@ -752,7 +757,8 @@ const Tools = (function () {
   function handleSelectDown(w) {
     dragUndoRecorded = false;
     const sel = State.getSelected();
-    if (sel && sel.points && !editModeRoadId) {
+    // 街区不可直接编辑形状：跳过顶点拖拽
+    if (sel && sel.points && !editModeRoadId && sel.type !== 'block') {
       for (let i = 0; i < sel.points.length; i++) {
         const p = sel.points[i];
         if (Math.hypot(w.x - p.x, w.y - p.y) * State.project.view.zoom < CONFIG.vertexHitRadius) {
@@ -764,7 +770,8 @@ const Tools = (function () {
     const hit = hitTest(w);
     if (hit) {
       State.setSelected(hit.id);
-      if (hit.points && hit.points.length > 0 && !editModeRoadId) {
+      // 街区不可拖拽移动；道路/边界/片区/标注可拖拽
+      if (hit.points && hit.points.length > 0 && !editModeRoadId && hit.type !== 'block') {
         entityDrag = { entityId: hit.id, offsetX: hit.points[0].x - w.x, offsetY: hit.points[0].y - w.y };
       }
     } else {
