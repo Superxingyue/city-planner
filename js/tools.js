@@ -522,24 +522,57 @@ const Tools = (function () {
     const curve = drawing.curve;
     // 创建持久边界线
     State.addEntity({ type: 'boundary', curve, points: pts });
-    // 自动拆分被边界穿过的街区
+
+    // 用洪水填充方案拆分被边界线穿过的街区：
+    // 删除原街区 → 从原质心填充一侧 → 从边界线另一侧填充另一侧
     const curvePts = curve === 'bezier' ? State.sampleSpline(pts, CONFIG.splineSegments) : pts;
     const blocks = State.project.entities.filter(e => e.type === 'block' && e.points && e.points.length >= 3);
     let splitCount = 0;
+
     for (const block of blocks) {
+      // 检查边界线是否穿过街区（任意采样点在街区内）
       let intersects = false;
       for (const cp of curvePts) {
         if (State.pointInPolygon(cp.x, cp.y, block.points)) { intersects = true; break; }
       }
       if (!intersects) continue;
-      const result = State.splitPolygonByCurve(block.points, curvePts);
-      if (result && result.length === 2) {
-        State.removeEntity(block.id);
-        State.addEntity({ type: 'block', category: block.category, name: block.name, points: result[0] });
-        State.addEntity({ type: 'block', category: block.category, name: block.name, points: result[1] });
-        splitCount++;
+
+      const category = block.category;
+      const center = State.polygonCenter(block.points);
+
+      // 计算边界线中点处的法向，用于找另一侧种子点
+      const midIdx = Math.floor(curvePts.length / 2);
+      const mid = curvePts[midIdx];
+      const prev = curvePts[Math.max(0, midIdx - 2)];
+      const next = curvePts[Math.min(curvePts.length - 1, midIdx + 2)];
+      const tx = next.x - prev.x, ty = next.y - prev.y;
+      const tlen = Math.hypot(tx, ty) || 1;
+      const nx = -ty / tlen, ny = tx / tlen; // 单位法向
+      // 判断质心在法向的哪一侧
+      const side = (center.x - mid.x) * nx + (center.y - mid.y) * ny;
+      const offset = 30;
+      const otherSeed = {
+        x: mid.x + nx * offset * (side >= 0 ? -1 : 1),
+        y: mid.y + ny * offset * (side >= 0 ? -1 : 1),
+      };
+
+      // 删除原街区（skipUndo，因为开头已 recordUndo）
+      State.removeEntity(block.id, true);
+
+      // 从原质心重新填充（边界线现在作为屏障，得到一侧）
+      const newPts1 = tryRefillAt(center.x, center.y);
+      if (newPts1 && newPts1.length >= 3) {
+        State.addEntity({ type: 'block', category, points: newPts1 }, true);
       }
+      // 从另一侧种子点填充（得到另一侧）
+      const newPts2 = tryRefillAt(otherSeed.x, otherSeed.y);
+      if (newPts2 && newPts2.length >= 3) {
+        State.addEntity({ type: 'block', category, points: newPts2 }, true);
+      }
+      splitCount++;
     }
+
+    if (splitCount > 0) showToast(`已拆分 ${splitCount} 个街区`);
     drawing = null;
     Renderer.setPreview(null);
     Renderer.render();
@@ -608,10 +641,10 @@ const Tools = (function () {
     }
     const pad = 80;
     minX -= pad; minY -= pad; maxX += pad; maxY += pad;
-    const scale = 2;
+    const scale = 3;
     const ow = Math.ceil((maxX - minX) * scale);
     const oh = Math.ceil((maxY - minY) * scale);
-    if (ow > 8000 || oh > 8000) { alert('区域过大，请缩小视图后再试。'); return; }
+    if (ow > 12000 || oh > 12000) { alert('区域过大，请缩小视图后再试。'); return; }
 
     const off = document.createElement('canvas');
     off.width = ow; off.height = oh;
@@ -626,7 +659,7 @@ const Tools = (function () {
       const pts = State.getRoadSamples(r);
       const mpp = State.project.meterPerPixel;
       const level = CONFIG.roadLevels[r.level] || CONFIG.roadLevels.local;
-      const w = level.width / mpp + (level.edgeWidth || 0) * 2 + 4;
+      const w = level.width / mpp + (level.edgeWidth || 0) * 2 + 2;
       octx.strokeStyle = '#000000';
       octx.lineWidth = w;
       octx.beginPath();
@@ -634,12 +667,12 @@ const Tools = (function () {
       for (let i = 1; i < pts.length; i++) octx.lineTo(pts[i].x, pts[i].y);
       octx.stroke();
     }
-    // 街区边界线也作为围合屏障
+    // 街区边界线也作为围合屏障（加宽以产生间隙）
     const boundaries = State.project.entities.filter(e => e.type === 'boundary' && e.points && e.points.length >= 2);
     for (const b of boundaries) {
       const pts = b.curve === 'bezier' ? State.sampleSpline(b.points, CONFIG.splineSegments) : b.points;
       octx.strokeStyle = '#000000';
-      octx.lineWidth = 3;
+      octx.lineWidth = 5;
       octx.beginPath();
       octx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) octx.lineTo(pts[i].x, pts[i].y);
@@ -971,16 +1004,33 @@ const Tools = (function () {
 
   /* ── 编辑后自动刷新相邻街区 ────────────────────────
      对被编辑线实体相邻的街区重新洪水填充；
-     面积变化在 30%~300% 内则更新，否则删除并提示 */
+     面积变化在 30%~300% 内则更新，否则删除并提示
+     相邻判定：线采样点在街区内，或街区顶点靠近线（覆盖道路向外移动的情况） */
   function refreshAdjacentBlocks(entity) {
     if (!entity || !entity.points) return;
     const samples = getLineSamples(entity);
     const blocks = State.project.entities.filter(e => e.type === 'block' && e.points);
+    // 相邻距离阈值
+    const mpp = State.project.meterPerPixel;
+    let threshold = 20;
+    if (entity.type === 'road') {
+      const level = CONFIG.roadLevels[entity.level] || CONFIG.roadLevels.local;
+      threshold = level.width / mpp / 2 + 12;
+    }
     const affected = [];
     for (const blk of blocks) {
+      let adjacent = false;
+      // 1. 线的采样点在街区内（道路向内侵蚀）
       for (const sp of samples) {
-        if (State.pointInPolygon(sp.x, sp.y, blk.points)) { affected.push(blk); break; }
+        if (State.pointInPolygon(sp.x, sp.y, blk.points)) { adjacent = true; break; }
       }
+      // 2. 街区顶点靠近被编辑线（道路向外移动时，顶点仍靠近道路）
+      if (!adjacent) {
+        for (const bp of blk.points) {
+          if (State.distToPolyline(bp.x, bp.y, samples) < threshold) { adjacent = true; break; }
+        }
+      }
+      if (adjacent) affected.push(blk);
     }
     if (affected.length === 0) return;
 
@@ -1028,9 +1078,9 @@ const Tools = (function () {
       }
     }
     const pad = 80; minX -= pad; minY -= pad; maxX += pad; maxY += pad;
-    const scale = 2;
+    const scale = 3;
     const ow = Math.ceil((maxX - minX) * scale), oh = Math.ceil((maxY - minY) * scale);
-    if (ow > 8000 || oh > 8000) return null;
+    if (ow > 12000 || oh > 12000) return null;
 
     const off = document.createElement('canvas');
     off.width = ow; off.height = oh;
@@ -1045,7 +1095,7 @@ const Tools = (function () {
       const mpp = State.project.meterPerPixel;
       const level = CONFIG.roadLevels[r.level] || CONFIG.roadLevels.local;
       octx.strokeStyle = '#000';
-      octx.lineWidth = level.width / mpp + (level.edgeWidth || 0) * 2 + 4;
+      octx.lineWidth = level.width / mpp + (level.edgeWidth || 0) * 2 + 2;
       octx.beginPath(); octx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) octx.lineTo(pts[i].x, pts[i].y);
       octx.stroke();
@@ -1053,7 +1103,7 @@ const Tools = (function () {
     for (const b of boundaries) {
       const pts = getLineSamples(b);
       octx.strokeStyle = '#000';
-      octx.lineWidth = 3;
+      octx.lineWidth = 5;
       octx.beginPath(); octx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) octx.lineTo(pts[i].x, pts[i].y);
       octx.stroke();
