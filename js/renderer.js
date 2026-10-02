@@ -12,6 +12,38 @@ const Renderer = (function () {
   let guideLine = null;
   let boundaryVisible = false;
   let offscreenCanvas = null; // 性能缓存：离屏画布复用
+  let renderScheduled = false; // rAF 节流标记
+
+  /** rAF 节流渲染：高频调用合并到下一帧 */
+  function scheduleRender() {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    requestAnimationFrame(() => {
+      renderScheduled = false;
+      render();
+    });
+  }
+
+  /** 计算实体包围盒（用于视口裁剪） */
+  function entityBBox(e) {
+    if (!e.points || e.points.length === 0) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of e.points) {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+    return { minX, minY, maxX, maxY };
+  }
+
+  /** 判断包围盒是否与可视区域相交（加 margin 容错） */
+  function bboxVisible(bbox, vx, vy, vw, vh, margin) {
+    if (!bbox) return true;
+    margin = margin || 100;
+    return !(bbox.maxX < vx - margin || bbox.minX > vx + vw + margin ||
+             bbox.maxY < vy - margin || bbox.minY > vy + vh + margin);
+  }
 
   function init(canvasEl) {
     canvas = canvasEl;
@@ -41,11 +73,15 @@ const Renderer = (function () {
     const { zoom, panX, panY } = p.view;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const w = canvas.clientWidth, h = canvas.clientHeight;
+    const cw = canvas.clientWidth, ch = canvas.clientHeight;
 
     // 白底（规划图标准）
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, w, h);
+    ctx.fillRect(0, 0, cw, ch);
+
+    // 可视区域（世界坐标），用于视口裁剪
+    const vx = -panX / zoom, vy = -panY / zoom;
+    const vw = cw / zoom, vh = ch / zoom;
 
     ctx.save();
     ctx.translate(panX, panY);
@@ -56,26 +92,55 @@ const Renderer = (function () {
 
     // 渲染顺序：水系 → 用地(街区/片区) → 道路 → 标注
     if (State.isLayerVisible('water')) {
-      for (const e of p.entities) if (e.type === 'water') drawWater(ctx, e);
+      for (const e of p.entities) {
+        if (e.type !== 'water') continue;
+        if (!bboxVisible(entityBBox(e), vx, vy, vw, vh)) continue;
+        drawWater(ctx, e);
+      }
     }
     if (State.isLayerVisible('landuse')) {
-      for (const e of p.entities) if (e.type === 'block' || e.type === 'district') drawLandUse(ctx, e);
+      for (const e of p.entities) {
+        if (e.type !== 'block' && e.type !== 'district') continue;
+        if (!bboxVisible(entityBBox(e), vx, vy, vw, vh)) continue;
+        drawLandUse(ctx, e);
+      }
       // 地块编号（在道路下方）
-      for (const e of p.entities) if (e.type === 'block') drawPlotNumber(ctx, e, zoom);
+      for (const e of p.entities) {
+        if (e.type !== 'block') continue;
+        if (!bboxVisible(entityBBox(e), vx, vy, vw, vh)) continue;
+        drawPlotNumber(ctx, e, zoom);
+      }
     }
     if (State.isLayerVisible('roads')) {
-      const roads = p.entities.filter(e => e.type === 'road');
-      // 离屏画布渲染：蓝边 → destination-out 挖空内部(透底图+路口融合) → 红中心线
-      drawRoadsOffscreen(ctx, roads, zoom, panX, panY);
-      drawIntersectionDots(ctx, zoom);
-      for (const e of roads) drawRoadName(ctx, e);
+      // 视口裁剪道路（道路宽度需要额外 margin）
+      const visibleRoads = [];
+      for (const e of p.entities) {
+        if (e.type !== 'road') continue;
+        const bb = entityBBox(e);
+        if (bb && !bboxVisible(bb, vx, vy, vw, vh, 200)) continue;
+        visibleRoads.push(e);
+      }
+      if (visibleRoads.length > 0) {
+        // 离屏画布渲染：蓝边 → destination-out 挖空内部(透底图+路口融合) → 红中心线
+        drawRoadsOffscreen(ctx, visibleRoads, zoom, panX, panY);
+        drawIntersectionDots(ctx, zoom);
+        for (const e of visibleRoads) drawRoadName(ctx, e);
+      }
     }
     // 街区边界线（仅在边界工具激活时显示）
     if (boundaryVisible && State.isLayerVisible('roads')) {
-      for (const e of p.entities) if (e.type === 'boundary') drawBoundary(ctx, e, zoom);
+      for (const e of p.entities) {
+        if (e.type !== 'boundary') continue;
+        if (!bboxVisible(entityBBox(e), vx, vy, vw, vh, 50)) continue;
+        drawBoundary(ctx, e, zoom);
+      }
     }
     if (State.isLayerVisible('annotations')) {
-      for (const e of p.entities) if (e.type === 'annotation') drawAnnotation(ctx, e, zoom);
+      for (const e of p.entities) {
+        if (e.type !== 'annotation') continue;
+        if (e.x < vx - 100 || e.x > vx + vw + 100 || e.y < vy - 100 || e.y > vy + vh + 100) continue;
+        drawAnnotation(ctx, e, zoom);
+      }
     }
 
     // 绘制预览
@@ -446,5 +511,5 @@ const Renderer = (function () {
       for (const e of p.entities) if (e.type === 'annotation') drawAnnotation(ctx, e, 1);
   }
 
-  return { init, resize, render, setPreview, setCalibrateLine, setEditMode, setGuideLine, setBoundaryVisible, renderContent };
+  return { init, resize, render, scheduleRender, setPreview, setCalibrateLine, setEditMode, setGuideLine, setBoundaryVisible, renderContent };
 })();
