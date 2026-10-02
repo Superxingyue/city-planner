@@ -6,7 +6,7 @@
 
 const CONFIG = {
   /* ── 版本 ────────────────────────────────────── */
-  version: 'v1.1.0',
+  version: 'v1.2.0',
 
   /* ── 字体栈 ────────────────────────────────────── */
   cadFont: '"Courier New","Consolas","Liberation Mono",monospace',
