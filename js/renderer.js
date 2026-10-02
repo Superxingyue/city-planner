@@ -268,26 +268,25 @@ const Renderer = (function () {
     ctx.stroke();
   }
 
-  /* ── 地块编号：正圆内显示用地代码（B1/R2 等），楷体 ──── */
+  /* ── 地块编号：正圆内显示用地代码（B1/R2 等），方正楷体，无填充 ──── */
   function drawPlotNumber(ctx, block, zoom) {
     if (!block.category || !block.points) return;
     const center = State.polygonCenter(block.points);
     const label = block.category;
-    const size = Math.max(7, Math.min(11, 9 / Math.max(0.5, zoom)));
+    // 固定半径，整体缩小
+    const radius = Math.max(4.5, 6 / Math.max(0.5, zoom));
+    // 文字占圈内比例大一些
+    const size = radius * 0.9;
     ctx.font = `${size}px ${CONFIG.kaiti}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const tw = ctx.measureText(label).width;
-    const radius = Math.max(tw * 0.65 + 3, size * 0.85);
-    // 正圆
+    // 无填充，仅细描边正圆
     ctx.beginPath();
     ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
-    ctx.fill();
     ctx.strokeStyle = '#1a1a1a';
-    ctx.lineWidth = Math.max(0.4, 0.6 / zoom);
+    ctx.lineWidth = Math.max(0.25, 0.35 / zoom);
     ctx.stroke();
-    // 文字（楷体）
+    // 文字（方正楷体）
     ctx.fillStyle = '#1a1a1a';
     ctx.fillText(label, center.x, center.y + 0.5);
   }
