@@ -8,6 +8,7 @@ const CONFIG = {
   /* ── 字体栈 ────────────────────────────────────── */
   cadFont: '"Courier New","Consolas","Liberation Mono",monospace',
   fangSong: '"FangSong","仿宋","STFangsong","SimSun",serif',
+  kaiti: '"KaiTi","楷体","STKaiti","SimKai","SimSun",serif',
 
   /* ── 国标用地图例（序号对应 GB 50137-2011 常用图例） ── */
   landUseLegend: {

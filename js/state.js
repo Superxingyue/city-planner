@@ -267,13 +267,12 @@ const State = (function () {
 
   function getRoadSamples(road) {
     if (road.curve !== 'bezier' || road.points.length < 2) return road.points;
-    // 缓存签名：点数+首尾各两点坐标
+    // 缓存签名：包含所有点坐标（拖动任意节点都能使缓存失效）
     const pts = road.points;
-    const n = pts.length;
-    const sig = n + '|' +
-      pts[0].x.toFixed(1) + ',' + pts[0].y.toFixed(1) + '|' +
-      pts[n-1].x.toFixed(1) + ',' + pts[n-1].y.toFixed(1) + '|' +
-      (n > 2 ? pts[1].x.toFixed(1) + ',' + pts[1].y.toFixed(1) : '');
+    let sig = pts.length + '|';
+    for (let i = 0; i < pts.length; i++) {
+      sig += pts[i].x.toFixed(1) + ',' + pts[i].y.toFixed(1) + ';';
+    }
     const cached = sampleCache.get(road.id);
     if (cached && cached.sig === sig) return cached.pts;
     const sampled = sampleSpline(pts, CONFIG.splineSegments);
@@ -399,10 +398,16 @@ const State = (function () {
     return { x: p1.x + t1 * d1x, y: p1.y + t1 * d1y, t1, t2 };
   }
 
-  /** 求两条道路采样线的所有交点 */
+  /** 求两条道路采样线的所有交点（含bbox快速排斥） */
   function roadIntersections(roadA, roadB) {
     const ptsA = getRoadSamples(roadA);
     const ptsB = getRoadSamples(roadB);
+    // bbox 快速排斥：不相交直接返回空
+    let minAX = Infinity, minAY = Infinity, maxAX = -Infinity, maxAY = -Infinity;
+    let minBX = Infinity, minBY = Infinity, maxBX = -Infinity, maxBY = -Infinity;
+    for (const p of ptsA) { if (p.x < minAX) minAX = p.x; if (p.x > maxAX) maxAX = p.x; if (p.y < minAY) minAY = p.y; if (p.y > maxAY) maxAY = p.y; }
+    for (const p of ptsB) { if (p.x < minBX) minBX = p.x; if (p.x > maxBX) maxBX = p.x; if (p.y < minBY) minBY = p.y; if (p.y > maxBY) maxBY = p.y; }
+    if (maxAX < minBX || maxBX < minAX || maxAY < minBY || maxBY < minAY) return [];
     const hits = [];
     for (let i = 0; i < ptsA.length - 1; i++) {
       for (let j = 0; j < ptsB.length - 1; j++) {
