@@ -11,10 +11,9 @@ const Renderer = (function () {
   let editModeRoadId = null;
   let guideLine = null;
   let boundaryVisible = false;
-  let offscreenCanvas = null; // 性能缓存：离屏画布复用
-  let renderScheduled = false; // rAF 节流标记
+  let offscreenCanvas = null;
+  let renderScheduled = false;
 
-  /** rAF 节流渲染：高频调用合并到下一帧 */
   function scheduleRender() {
     if (renderScheduled) return;
     renderScheduled = true;
@@ -24,7 +23,6 @@ const Renderer = (function () {
     });
   }
 
-  /** 计算实体包围盒（用于视口裁剪） */
   function entityBBox(e) {
     if (!e.points || e.points.length === 0) return null;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -37,7 +35,6 @@ const Renderer = (function () {
     return { minX, minY, maxX, maxY };
   }
 
-  /** 判断包围盒是否与可视区域相交（加 margin 容错） */
   function bboxVisible(bbox, vx, vy, vw, vh, margin) {
     if (!bbox) return true;
     margin = margin || 100;
@@ -66,7 +63,6 @@ const Renderer = (function () {
   function setGuideLine(gl) { guideLine = gl; }
   function setBoundaryVisible(v) { boundaryVisible = v; }
 
-  /* ── 主渲染 ────────────────────────────────────── */
   function render() {
     if (!ctx || !canvas) return;
     const p = State.project;
@@ -75,11 +71,9 @@ const Renderer = (function () {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const cw = canvas.clientWidth, ch = canvas.clientHeight;
 
-    // 白底（规划图标准）
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, cw, ch);
 
-    // 可视区域（世界坐标），用于视口裁剪
     const vx = -panX / zoom, vy = -panY / zoom;
     const vw = cw / zoom, vh = ch / zoom;
 
@@ -87,10 +81,8 @@ const Renderer = (function () {
     ctx.translate(panX, panY);
     ctx.scale(zoom, zoom);
 
-    // 底图
     if (State.isLayerVisible('basemap')) drawBasemap(ctx);
 
-    // 渲染顺序：水系 → 用地(街区/片区) → 道路 → 标注
     if (State.isLayerVisible('water')) {
       for (const e of p.entities) {
         if (e.type !== 'water') continue;
@@ -104,7 +96,6 @@ const Renderer = (function () {
         if (!bboxVisible(entityBBox(e), vx, vy, vw, vh)) continue;
         drawLandUse(ctx, e);
       }
-      // 地块编号（在道路下方）
       for (const e of p.entities) {
         if (e.type !== 'block') continue;
         if (!bboxVisible(entityBBox(e), vx, vy, vw, vh)) continue;
@@ -112,7 +103,6 @@ const Renderer = (function () {
       }
     }
     if (State.isLayerVisible('roads')) {
-      // 视口裁剪道路（道路宽度需要额外 margin）
       const visibleRoads = [];
       for (const e of p.entities) {
         if (e.type !== 'road') continue;
@@ -121,13 +111,11 @@ const Renderer = (function () {
         visibleRoads.push(e);
       }
       if (visibleRoads.length > 0) {
-        // 离屏画布渲染：蓝边 → destination-out 挖空内部(透底图+路口融合) → 红中心线
         drawRoadsOffscreen(ctx, visibleRoads, zoom, panX, panY);
         drawIntersectionDots(ctx, zoom);
         for (const e of visibleRoads) drawRoadName(ctx, e);
       }
     }
-    // 街区边界线（仅在边界工具激活时显示）
     if (boundaryVisible && State.isLayerVisible('roads')) {
       for (const e of p.entities) {
         if (e.type !== 'boundary') continue;
@@ -143,19 +131,16 @@ const Renderer = (function () {
       }
     }
 
-    // 绘制预览
     if (previewProvider) previewProvider(ctx, zoom);
     if (calibrateLine) drawCalibrateLine(ctx, calibrateLine, zoom);
     if (guideLine) drawGuideLine(ctx, guideLine, zoom);
 
     ctx.restore();
 
-    // 选中态（屏幕空间）
     const sel = State.getSelected();
     if (sel) drawSelection(ctx, sel, zoom, panX, panY);
   }
 
-  /* ── 底图 ──────────────────────────────────────── */
   function drawBasemap(ctx) {
     const img = State.getBasemapImage();
     const bm = State.project.basemap;
@@ -172,12 +157,9 @@ const Renderer = (function () {
     ctx.restore();
   }
 
-  /* ── 离屏道路渲染：蓝边 → destination-out 挖空 → 红中心 ──
-     内部透明透底图，路口处蓝线被交叉路的挖空层融合 */
   function drawRoadsOffscreen(ctx, roads, zoom, panX, panY) {
     if (roads.length === 0) return;
     const dpr = window.devicePixelRatio || 1;
-    // 复用离屏画布，仅在尺寸变化时重建
     if (!offscreenCanvas || offscreenCanvas.width !== canvas.width || offscreenCanvas.height !== canvas.height) {
       offscreenCanvas = document.createElement('canvas');
       offscreenCanvas.width = canvas.width;
@@ -185,17 +167,14 @@ const Renderer = (function () {
     }
     const off = offscreenCanvas;
     const octx = off.getContext('2d');
-    // 必须先重置变换再清除，否则上一帧的变换会导致只清除局部区域
     octx.setTransform(1, 0, 0, 1, 0, 0);
     octx.clearRect(0, 0, off.width, off.height);
-    // 与主画布相同的变换链：DPR → 平移 → 缩放
     octx.setTransform(dpr, 0, 0, dpr, 0, 0);
     octx.translate(panX, panY);
     octx.scale(zoom, zoom);
     octx.lineCap = 'round';
     octx.lineJoin = 'round';
 
-    // 通道1：所有蓝边
     for (const road of roads) {
       if (!road.points || road.points.length < 2) continue;
       const level = CONFIG.roadLevels[road.level] || CONFIG.roadLevels.local;
@@ -210,7 +189,6 @@ const Renderer = (function () {
       octx.stroke();
     }
 
-    // 通道2：destination-out 挖空道路内部（同时挖掉路口交叉处的蓝边）
     octx.globalCompositeOperation = 'destination-out';
     for (const road of roads) {
       if (!road.points || road.points.length < 2) continue;
@@ -225,7 +203,6 @@ const Renderer = (function () {
     }
     octx.globalCompositeOperation = 'source-over';
 
-    // 通道3：红点划线中心线
     for (const road of roads) {
       if (!road.points || road.points.length < 2) continue;
       const level = CONFIG.roadLevels[road.level] || CONFIG.roadLevels.local;
@@ -241,14 +218,12 @@ const Renderer = (function () {
       octx.setLineDash([]);
     }
 
-    // 将离屏画布贴回主画布（单位变换，物理像素对齐）
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(off, 0, 0);
     ctx.restore();
   }
 
-  /* ── 道路分层渲染（多通道，保留供预览使用） ──────── */
   function drawRoadLayer(ctx, road, layer) {
     if (!road.points || road.points.length < 2) return;
     const level = CONFIG.roadLevels[road.level] || CONFIG.roadLevels.local;
@@ -298,7 +273,6 @@ const Renderer = (function () {
     ctx.fillText(road.name, mid.x, mid.y - W / 2 - 4);
   }
 
-  /* ── 路口绿点 ──────────────────────────────────── */
   function drawIntersectionDots(ctx, zoom) {
     const pts = State.getAllIntersections();
     const r = Math.max(0.8, 1.5 / Math.max(0.5, zoom));
@@ -317,7 +291,6 @@ const Renderer = (function () {
     ctx.stroke();
   }
 
-  /* ── 用地（街区/片区）平涂 ─────────────────────── */
   function drawLandUse(ctx, e) {
     if (!e.points || e.points.length < 3) return;
     const cat = getLandUseByCode(e.category) || { color: '#cccccc' };
@@ -327,36 +300,31 @@ const Renderer = (function () {
     ctx.closePath();
     ctx.fillStyle = cat.color;
     ctx.fill();
-    // 细边框（同色系加深）
     ctx.strokeStyle = darken(cat.color, 0.3);
     ctx.lineWidth = 0.15;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
     ctx.stroke();
   }
 
-  /* ── 地块编号：正圆内显示用地代码（B1/R2 等），方正楷体，无填充 ──── */
   function drawPlotNumber(ctx, block, zoom) {
     if (!block.category || !block.points) return;
     const center = State.polygonCenter(block.points);
     const label = block.category;
-    // 固定半径，整体缩小
     const radius = Math.max(4.5, 6 / Math.max(0.5, zoom));
-    // 文字占圈内比例大一些
     const size = radius * 0.9;
     ctx.font = `${size}px ${CONFIG.kaiti}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    // 无填充，仅细描边正圆
     ctx.beginPath();
     ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
     ctx.strokeStyle = '#1a1a1a';
     ctx.lineWidth = Math.max(0.25, 0.35 / zoom);
     ctx.stroke();
-    // 文字（方正楷体）
     ctx.fillStyle = '#1a1a1a';
     ctx.fillText(label, center.x, center.y + 0.5);
   }
 
-  /* ── 街区边界线（细灰实线，非道路） ────────────── */
   function drawBoundary(ctx, b, zoom) {
     if (!b.points || b.points.length < 2) return;
     const pts = b.curve === 'bezier' ? State.sampleSpline(b.points, CONFIG.splineSegments) : b.points;
@@ -372,7 +340,6 @@ const Renderer = (function () {
     ctx.setLineDash([]);
   }
 
-  /* ── 水系 ──────────────────────────────────────── */
   function drawWater(ctx, w) {
     if (!w.points || w.points.length < 3) return;
     ctx.beginPath();
@@ -386,7 +353,6 @@ const Renderer = (function () {
     ctx.stroke();
   }
 
-  /* ── 标注 ──────────────────────────────────────── */
   function drawAnnotation(ctx, a, zoom) {
     const size = (a.fontSize || 14) / Math.max(0.5, zoom);
     ctx.fillStyle = a.color || '#1a1a1a';
@@ -396,7 +362,6 @@ const Renderer = (function () {
     ctx.fillText(a.text || '', a.x, a.y);
   }
 
-  /* ── 校准线 ────────────────────────────────────── */
   function drawCalibrateLine(ctx, line, zoom) {
     ctx.strokeStyle = '#d62b2b';
     ctx.lineWidth = 2 / zoom;
@@ -414,7 +379,6 @@ const Renderer = (function () {
     }
   }
 
-  /* ── 节点编辑引导线 ────────────────────────────── */
   function drawGuideLine(ctx, gl, zoom) {
     ctx.strokeStyle = '#ff6b35';
     ctx.lineWidth = 1.2 / Math.max(0.5, zoom);
@@ -430,16 +394,12 @@ const Renderer = (function () {
     ctx.fill();
   }
 
-  /* ── 选中态 ──────────────────────────────────────
-     非编辑模式：不画任何标记（用户不喜欢蓝框蓝点）
-     编辑模式（右键道路/边界）：画橙色节点 */
   function drawSelection(ctx, entity, zoom, panX, panY) {
     if (!entity.points) return;
     const isEdit = editModeRoadId === entity.id;
-    if (!isEdit) return; // 非编辑模式无视觉反馈
+    if (!isEdit) return;
 
     const toScreen = p => ({ x: p.x * zoom + panX, y: p.y * zoom + panY });
-    // 编辑模式：橙色节点
     for (let i = 0; i < entity.points.length; i++) {
       const s = toScreen(entity.points[i]);
       ctx.fillStyle = '#ff6b35';
@@ -471,7 +431,6 @@ const Renderer = (function () {
     return `rgb(${Math.round(r * f)},${Math.round(g * f)},${Math.round(b * f)})`;
   }
 
-  /* ── 导出用纯内容渲染 ──────────────────────────── */
   function renderContent(ctx, opts) {
     opts = opts || {};
     const p = State.project;
@@ -485,9 +444,7 @@ const Renderer = (function () {
     if (State.isLayerVisible('roads')) {
       const roads = p.entities.filter(e => e.type === 'road');
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-      // 蓝边
       for (const e of roads) drawRoadLayer(ctx, e, 'edge');
-      // destination-out 挖空内部（路口融合）
       ctx.globalCompositeOperation = 'destination-out';
       for (const e of roads) {
         if (!e.points || e.points.length < 2) continue;
@@ -501,7 +458,6 @@ const Renderer = (function () {
         ctx.stroke();
       }
       ctx.globalCompositeOperation = 'source-over';
-      // 红中心
       for (const e of roads) drawRoadLayer(ctx, e, 'center');
       drawIntersectionDots(ctx, 1);
       for (const e of roads) drawRoadName(ctx, e);
