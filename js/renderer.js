@@ -264,7 +264,7 @@ const Renderer = (function () {
     ctx.fill();
     // 细边框（同色系加深）
     ctx.strokeStyle = darken(cat.color, 0.3);
-    ctx.lineWidth = 0.4;
+    ctx.lineWidth = 0.15;
     ctx.stroke();
   }
 
