@@ -1,5 +1,5 @@
 /**
- * tools.js — 绘制工具与交互（v3）
+ * tools.js — 绘制工具与交互
  * 左键绘制+回车完成 · 右键编辑道路节点 · 右键菜单 · 街区拆分器 · 路口自动修剪
  */
 'use strict';
@@ -27,7 +27,7 @@ const Tools = (function () {
   let mouseDownPos = null;
   let mouseDownTime = 0;
   let editModeRoadId = null;
-  let extendEnd = null; // 'start' | 'end' | null
+  let extendEnd = null;
   let contextMenuEl = null;
   let eraserActive = false;
   let shiftPressed = false;
@@ -92,7 +92,6 @@ const Tools = (function () {
     return { x: (sx - panX) / zoom, y: (sy - panY) / zoom };
   }
 
-  /** 获取道路或边界线的采样点 */
   function getLineSamples(ent) {
     if (!ent || !ent.points) return [];
     if (ent.type === 'road') return State.getRoadSamples(ent);
@@ -100,7 +99,6 @@ const Tools = (function () {
     return ent.points;
   }
 
-  /** Shift 约束：将目标点吸附到水平/垂直/45°方向 */
   function constrainToAxis(from, to) {
     const dx = to.x - from.x;
     const dy = to.y - from.y;
@@ -108,12 +106,10 @@ const Tools = (function () {
     const ady = Math.abs(dy);
     if (adx < 0.5 && ady < 0.5) return to;
     const maxDim = Math.max(adx, ady);
-    // 45°：|dx| 与 |dy| 接近
     if (Math.abs(adx - ady) < maxDim * 0.35) {
       const avg = (adx + ady) / 2;
       return { x: from.x + (dx >= 0 ? avg : -avg), y: from.y + (dy >= 0 ? avg : -avg) };
     }
-    // 水平或垂直
     if (adx > ady) return { x: to.x, y: from.y };
     return { x: from.x, y: to.y };
   }
@@ -158,7 +154,6 @@ const Tools = (function () {
     }
   }
 
-  /* ── 鼠标按下 ──────────────────────────────────── */
   function onMouseDown(e) {
     mouseDownPos = { x: e.clientX, y: e.clientY };
     mouseDownTime = Date.now();
@@ -208,7 +203,6 @@ const Tools = (function () {
     }
   }
 
-  /* ── 右键处理 ──────────────────────────────────── */
   function handleRightClick(e) {
     const w = toWorld(e.clientX, e.clientY);
 
@@ -218,7 +212,7 @@ const Tools = (function () {
         for (let i = 0; i < ent.points.length; i++) {
           const p = ent.points[i];
           if (Math.hypot(w.x - p.x, w.y - p.y) * State.project.view.zoom < CONFIG.vertexHitRadius + 2) {
-            if (ent.points.length <= 2) { alert('至少需要2个节点'); return; }
+            if (ent.points.length <= 2) { UI.Modal.alert('至少需要2个节点'); return; }
             State.recordUndo();
             ent.points.splice(i, 1);
             extendEnd = null;
@@ -249,14 +243,16 @@ const Tools = (function () {
         ];
         if (hit.type === 'block' || hit.type === 'district') {
           items.unshift({ label: '更改用地分类…', action: 'cat', onClick: () => {
-            const input = prompt('输入用地分类代码（如 R2、B1、G1）：', hit.category || 'R2');
-            if (input) { State.updateEntity(hit.id, { category: input.trim() }); Renderer.render(); }
+            UI.Modal.prompt('输入用地分类代码（如 R2、B1、G1）：', hit.category || 'R2').then(input => {
+              if (input) { State.updateEntity(hit.id, { category: input.trim() }); Renderer.render(); }
+            });
           }});
         }
         if (hit.type === 'annotation') {
           items.unshift({ label: '编辑文字…', action: 'text', onClick: () => {
-            const text = prompt('标注文字：', hit.text || '');
-            if (text !== null) { State.updateEntity(hit.id, { text }); Renderer.render(); }
+            UI.Modal.prompt('标注文字：', hit.text || '').then(text => {
+              if (text !== null) { State.updateEntity(hit.id, { text }); Renderer.render(); }
+            });
           }});
         }
         showContextMenu(e.clientX, e.clientY, items);
@@ -267,16 +263,11 @@ const Tools = (function () {
     }
   }
 
-  /* ── 编辑模式左键 ────────────────────────────────
-     端点点击 → 进入延伸模式（start=向前追加, end=向后追加）
-     延伸模式下点击空白 → 在对应端点插入节点
-     中间节点点击 → 仅可拖拽 */
   function handleEditModeClick(w, e) {
     const ent = State.getEntity(editModeRoadId);
     if (!ent || !ent.points) { exitEditMode(); return; }
     const isRoad = ent.type === 'road';
 
-    // 检查是否点击了现有节点
     let hitIdx = -1;
     for (let i = 0; i < ent.points.length; i++) {
       const p = ent.points[i];
@@ -300,7 +291,6 @@ const Tools = (function () {
       return;
     }
 
-    // 延伸模式：点击空白处添加节点到对应端点
     if (extendEnd !== null) {
       State.recordUndo();
       const endPoint = extendEnd === 'start' ? ent.points[0] : ent.points[ent.points.length - 1];
@@ -317,7 +307,6 @@ const Tools = (function () {
       return;
     }
 
-    // 未在延伸模式且未点中节点：靠近线则忽略，远离则退出
     const mpp = State.project.meterPerPixel;
     const level = isRoad ? (CONFIG.roadLevels[ent.level] || CONFIG.roadLevels.local) : null;
     const threshold = level ? Math.max(level.width / mpp * 1.5, 30) : 20;
@@ -338,12 +327,10 @@ const Tools = (function () {
     return Math.hypot(px - (a.x + t * dx), py - (a.y + t * dy));
   }
 
-  /* ── 鼠标移动 ──────────────────────────────────── */
   function onMouseMove(e) {
     const w = toWorld(e.clientX, e.clientY);
     coordListeners.forEach(fn => fn(w));
 
-    // 橡皮擦拖拽
     if (eraserActive) { eraseAt(w); return; }
 
     if (isDragging && dragStart) {
@@ -364,7 +351,6 @@ const Tools = (function () {
       return;
     }
 
-    // 延伸模式：预览（道路显示完整样式，边界显示细虚线）
     if (editModeRoadId && extendEnd !== null && !vertexDrag) {
       const ent = State.getEntity(editModeRoadId);
       if (ent && ent.points && ent.points.length >= 2) {
@@ -444,7 +430,6 @@ const Tools = (function () {
     }
   }
 
-  /* ── 鼠标抬起 ──────────────────────────────────── */
   function onMouseUp(e) {
     if (eraserActive) { eraserActive = false; return; }
     if (isDragging && dragStart) {
@@ -477,7 +462,6 @@ const Tools = (function () {
     vertexDrag = null; entityDrag = null; dragUndoRecorded = false;
   }
 
-  /* ── 左键单击 ──────────────────────────────────── */
   function handleClick(e) {
     const w = toWorld(e.clientX, e.clientY);
 
@@ -508,14 +492,18 @@ const Tools = (function () {
     } else if (current === 'block-fill') {
       fillBlockAt(w.x, w.y);
     } else if (current === 'annotation') {
-      const text = options.annotationText || prompt('请输入标注文字：', '标注');
-      if (text) {
-        State.addEntity({ type: 'annotation', x: w.x, y: w.y, text, fontSize: options.annotationSize, color: '#1a1a1a', align: 'left' });
+      if (options.annotationText) {
+        State.addEntity({ type: 'annotation', x: w.x, y: w.y, text: options.annotationText, fontSize: options.annotationSize, color: '#1a1a1a', align: 'left' });
+      } else {
+        UI.Modal.prompt('请输入标注文字：', '标注').then(text => {
+          if (text) {
+            State.addEntity({ type: 'annotation', x: w.x, y: w.y, text, fontSize: options.annotationSize, color: '#1a1a1a', align: 'left' });
+          }
+        });
       }
     }
   }
 
-  /* ── 回车完成绘制 ──────────────────────────────── */
   function finishByEnter() {
     if (!drawing) return;
     if (drawing.type === 'road' && drawing.points.length >= 2) {
@@ -536,10 +524,8 @@ const Tools = (function () {
     drawing = null;
     Renderer.setPreview(null);
     State.trimTJunctions();
-    // 新道路穿过街区时自动拆分（类似划边界的拆分功能）
     const roadSamples = State.getRoadSamples(newRoad);
     const splitCount = splitIntersectedBlocks(roadSamples);
-    // 同时刷新相邻但未被穿过的街区
     refreshAdjacentBlocks(newRoad);
     if (splitCount > 0) showToast(`道路已拆分 ${splitCount} 个街区`);
     Renderer.render();
@@ -550,13 +536,10 @@ const Tools = (function () {
     State.recordUndo();
     const pts = drawing.points.map(p => ({ x: p.x, y: p.y }));
     const curve = drawing.curve;
-    // 创建持久边界线
     State.addEntity({ type: 'boundary', curve, points: pts });
 
-    // 用共享函数拆分被边界线穿过的街区
     const curvePts = curve === 'bezier' ? State.sampleSpline(pts, CONFIG.splineSegments) : pts;
     const splitCount = splitIntersectedBlocks(curvePts);
-    // 刷新相邻街区
     const boundaryEntity = State.project.entities[State.project.entities.length - 1];
     refreshAdjacentBlocks(boundaryEntity);
 
@@ -589,23 +572,20 @@ const Tools = (function () {
     Renderer.setCalibrateLine(null);
     calibrateStart = null; isDragging = false;
     if (pxLen < 5) return;
-    const input = prompt(`该线段图上长度 ${pxLen.toFixed(1)} 像素。\n请输入实际长度（米）：`, '500');
-    if (input === null) return;
-    const meters = parseFloat(input);
-    if (!meters || meters <= 0) { alert('请输入有效的正数'); return; }
-    State.setProjectMeta({ meterPerPixel: meters / pxLen });
-    alert(`比例尺已校准：1 像素 = ${(meters / pxLen).toFixed(3)} 米`);
-    setTool('select');
+    UI.Modal.prompt(`该线段图上长度 ${pxLen.toFixed(1)} 像素。\n请输入实际长度（米）：`, '500').then(input => {
+      if (input === null) return;
+      const meters = parseFloat(input);
+      if (!meters || meters <= 0) { UI.Modal.alert('请输入有效的正数'); return; }
+      State.setProjectMeta({ meterPerPixel: meters / pxLen });
+      UI.Modal.alert(`比例尺已校准：1 像素 = ${(meters / pxLen).toFixed(3)} 米`);
+      setTool('select');
+    });
   }
 
-  /* ══════════════════════════════════════════════════
-     智能填充街区
-     ══════════════════════════════════════════════════ */
   function fillBlockAt(worldX, worldY) {
     const roads = State.project.entities.filter(e => e.type === 'road' && e.points && e.points.length >= 2);
-    if (roads.length === 0) { alert('请先绘制道路，再使用街区填充。'); return; }
+    if (roads.length === 0) { UI.Modal.alert('请先绘制道路，再使用街区填充。'); return; }
 
-    // 街区认领：点击点已在现有街区内 → 直接更改其用途，不重复创建
     const existingBlocks = State.project.entities.filter(e => e.type === 'block' && e.points);
     for (const blk of existingBlocks) {
       if (State.pointInPolygon(worldX, worldY, blk.points)) {
@@ -632,7 +612,7 @@ const Tools = (function () {
     const scale = 4;
     const ow = Math.ceil((maxX - minX) * scale);
     const oh = Math.ceil((maxY - minY) * scale);
-    if (ow > 10000 || oh > 10000) { alert('区域过大，请缩小视图后再试。'); return; }
+    if (ow > 10000 || oh > 10000) { UI.Modal.alert('区域过大，请缩小视图后再试。'); return; }
 
     const off = document.createElement('canvas');
     off.width = ow; off.height = oh;
@@ -655,7 +635,6 @@ const Tools = (function () {
       for (let i = 1; i < pts.length; i++) octx.lineTo(pts[i].x, pts[i].y);
       octx.stroke();
     }
-    // 街区边界线也作为围合屏障（极窄，几乎无空隙）
     const boundaries = State.project.entities.filter(e => e.type === 'boundary' && e.points && e.points.length >= 2);
     for (const b of boundaries) {
       const pts = b.curve === 'bezier' ? State.sampleSpline(b.points, CONFIG.splineSegments) : b.points;
@@ -670,15 +649,15 @@ const Tools = (function () {
     const seedX = (worldX - minX) * scale;
     const seedY = (worldY - minY) * scale;
     const result = State.floodFillContour(octx, seedX, seedY);
-    if (result.leaked) { alert('该区域未被道路完全围合，无法填充。请检查道路是否闭合。'); return; }
-    if (result.points.length < 6) { alert('未检测到有效的街区区域。'); return; }
+    if (result.leaked) { UI.Modal.alert('该区域未被道路完全围合，无法填充。请检查道路是否闭合。'); return; }
+    if (result.points.length < 6) { UI.Modal.alert('未检测到有效的街区区域。'); return; }
 
     const worldPts = result.points.map(([px, py]) => ({ x: px / scale + minX, y: py / scale + minY }));
     const simplified = State.simplifyDP(worldPts, 0.5 / scale);
-    if (simplified.length < 3) { alert('区域过小。'); return; }
+    if (simplified.length < 3) { UI.Modal.alert('区域过小。'); return; }
+    const smoothed = State.smoothChaikinClosed(simplified, 1);
 
-    // 二次认领：新街区质心若落在现有街区内则跳过（防御性检查）
-    const center = State.polygonCenter(simplified);
+    const center = State.polygonCenter(smoothed);
     for (const blk of existingBlocks) {
       if (State.pointInPolygon(center.x, center.y, blk.points)) {
         State.recordUndo();
@@ -687,11 +666,10 @@ const Tools = (function () {
         return;
       }
     }
-    State.addEntity({ type: 'block', category: options.landUseCode, name: options.districtName, points: simplified });
+    State.addEntity({ type: 'block', category: options.landUseCode, name: options.districtName, points: smoothed });
     Renderer.render();
   }
 
-  /* ── 预览绘制 ──────────────────────────────────── */
   function updatePreview() {
     if (!drawing) { Renderer.setPreview(null); Renderer.scheduleRender(); return; }
     Renderer.setPreview((ctx, zoom) => {
@@ -743,7 +721,6 @@ const Tools = (function () {
         ctx.globalAlpha = 0.5;
         ctx.fill();
         ctx.globalAlpha = 1;
-        // 无蓝色虚线边框，仅用细实线提示
         ctx.strokeStyle = 'rgba(0,0,0,0.3)';
         ctx.lineWidth = 0.8 / zoom;
         ctx.stroke();
@@ -773,11 +750,9 @@ const Tools = (function () {
     ctx.stroke();
   }
 
-  /* ── 选择工具 ──────────────────────────────────── */
   function handleSelectDown(w) {
     dragUndoRecorded = false;
     const sel = State.getSelected();
-    // 街区不可直接编辑形状：跳过顶点拖拽
     if (sel && sel.points && !editModeRoadId && sel.type !== 'block') {
       for (let i = 0; i < sel.points.length; i++) {
         const p = sel.points[i];
@@ -790,7 +765,6 @@ const Tools = (function () {
     const hit = hitTest(w);
     if (hit) {
       State.setSelected(hit.id);
-      // 街区不可拖拽移动；道路/边界/片区/标注可拖拽
       if (hit.points && hit.points.length > 0 && !editModeRoadId && hit.type !== 'block') {
         entityDrag = { entityId: hit.id, offsetX: hit.points[0].x - w.x, offsetY: hit.points[0].y - w.y };
       }
@@ -824,7 +798,6 @@ const Tools = (function () {
     return null;
   }
 
-  /* ── 键盘 ──────────────────────────────────────── */
   function onKeyDown(e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
     if (e.key === 'Shift') { shiftPressed = true; return; }
@@ -832,7 +805,6 @@ const Tools = (function () {
     if (e.key === 'Enter') {
       if (drawing) { e.preventDefault(); finishByEnter(); return; }
       if (editModeRoadId && extendEnd !== null) {
-        // 退出延伸模式，保持编辑模式
         e.preventDefault();
         extendEnd = null;
         Renderer.setGuideLine(null);
@@ -863,7 +835,6 @@ const Tools = (function () {
     if (e.code === 'Space') spacePan = false;
   }
 
-  /* ── 滚轮缩放 ──────────────────────────────────── */
   function onWheel(e) {
     e.preventDefault();
     const rect = canvas.getBoundingClientRect();
@@ -882,13 +853,11 @@ const Tools = (function () {
     if (sel) { State.removeEntity(sel.id); exitEditMode(); Renderer.render(); }
   }
 
-  /* ── 橡皮擦：擦除节点，拆分道路/边界，删除关联街区 ── */
   function eraseAt(w) {
     const zoom = State.project.view.zoom;
     const hitR = CONFIG.vertexHitRadius / zoom;
     let erased = false;
 
-    // 收集所有可擦除的线实体（道路+边界）
     const lineEntities = State.project.entities.filter(e =>
       (e.type === 'road' || e.type === 'boundary') && e.points && e.points.length >= 2);
 
@@ -910,20 +879,16 @@ const Tools = (function () {
     }
   }
 
-  /** 从线实体中移除节点：端点直接删，内部节点拆分为两段 */
   function splitOrRemoveNode(ent, idx) {
     const pts = ent.points;
     if (pts.length <= 2) {
-      // 不足3个节点，删除整个实体并清除关联街区
       removeEntityAndBlocks(ent);
       return;
     }
     if (idx === 0 || idx === pts.length - 1) {
-      // 端点：直接删除
       pts.splice(idx, 1);
       removeBlocksAdjacentTo(ent);
     } else {
-      // 内部节点：拆分为两段
       const leftPts = pts.slice(0, idx);
       const rightPts = pts.slice(idx + 1);
       State.removeEntity(ent.id);
@@ -937,20 +902,17 @@ const Tools = (function () {
     }
   }
 
-  /** 删除实体及与其相邻的所有街区 */
   function removeEntityAndBlocks(ent) {
     removeBlocksAdjacentTo(ent);
     State.removeEntity(ent.id);
   }
 
-  /** 删除与指定线实体相邻的街区 */
   function removeBlocksAdjacentTo(lineEnt) {
     if (!lineEnt.points) return;
     const samples = lineEnt.type === 'road' ? State.getRoadSamples(lineEnt) :
       (lineEnt.curve === 'bezier' ? State.sampleSpline(lineEnt.points, CONFIG.splineSegments) : lineEnt.points);
     const blocks = State.project.entities.filter(e => e.type === 'block' && e.points);
     for (const blk of blocks) {
-      // 只要线的任意采样点在街区内，或街区任意顶点在线附近，视为相邻
       let adjacent = false;
       for (const sp of samples) {
         if (State.pointInPolygon(sp.x, sp.y, blk.points)) { adjacent = true; break; }
@@ -964,7 +926,6 @@ const Tools = (function () {
     }
   }
 
-  /* ── 街区清除器：点击删除指定街区 ── */
   function clearBlockAt(w) {
     const blocks = State.project.entities.filter(e => e.type === 'block' && e.points);
     for (const blk of blocks) {
@@ -977,7 +938,6 @@ const Tools = (function () {
     }
   }
 
-  /* ── Toast 通知 ─────────────────────────────────── */
   let toastTimer = null;
   function showToast(msg, duration) {
     duration = duration || 2500;
@@ -993,9 +953,6 @@ const Tools = (function () {
     toastTimer = setTimeout(() => el.classList.remove('show'), duration);
   }
 
-  /* ── 编辑后自动刷新相邻街区 ────────────────────────
-     街区完全随道路/边界变动：删除所有相邻街区→从原质心重新填充（保留名称和类型）
-     填充失败则永久删除。相邻判定：线采样点在街区内 OR 街区顶点靠近线 */
   function refreshAdjacentBlocks(entity) {
     if (!entity || !entity.points) return;
     const samples = getLineSamples(entity);
@@ -1022,7 +979,6 @@ const Tools = (function () {
     }
     if (affected.length === 0) return;
 
-    // 记录信息后全部删除
     const toRefill = affected.map(blk => ({
       category: blk.category,
       name: blk.name,
@@ -1030,10 +986,8 @@ const Tools = (function () {
     }));
     for (const blk of affected) State.removeEntity(blk.id, true);
 
-    // 逐个重新填充
     let refreshed = 0, removed = 0;
     for (const info of toRefill) {
-      // 街区认领：质心已在新创建的街区内则跳过
       const currentBlocks = State.project.entities.filter(e => e.type === 'block' && e.points);
       let claimed = false;
       for (const blk of currentBlocks) {
@@ -1053,7 +1007,6 @@ const Tools = (function () {
     if (removed > 0) showToast(`${removed} 个街区因边界变动已清除`, 3500);
   }
 
-  /** 尝试在指定点重新洪水填充，返回轮廓点或 null（高精度版） */
   function tryRefillAt(wx, wy) {
     const roads = State.project.entities.filter(e => e.type === 'road' && e.points && e.points.length >= 2);
     const boundaries = State.project.entities.filter(e => e.type === 'boundary' && e.points && e.points.length >= 2);
@@ -1106,10 +1059,11 @@ const Tools = (function () {
     const result = State.floodFillContour(octx, seedX, seedY);
     if (result.leaked || result.points.length < 6) return null;
     const worldPts = result.points.map(([px, py]) => ({ x: px / scale + minX, y: py / scale + minY }));
-    return State.simplifyDP(worldPts, 0.5 / scale);
+    const simplified = State.simplifyDP(worldPts, 0.5 / scale);
+    if (simplified.length < 3) return null;
+    return State.smoothChaikinClosed(simplified, 1);
   }
 
-  /** 带 fallback 的重填充：原点失败时尝试周围8个偏移点 */
   function tryRefillAtWithFallback(wx, wy) {
     let pts = tryRefillAt(wx, wy);
     if (pts && pts.length >= 3) return pts;
@@ -1120,7 +1074,6 @@ const Tools = (function () {
     return null;
   }
 
-  /** 用线（道路/边界）拆分被穿过的街区：删除原街区→从两侧分别洪水填充 */
   function splitIntersectedBlocks(lineSamples) {
     if (!lineSamples || lineSamples.length < 2) return 0;
     const blocks = State.project.entities.filter(e => e.type === 'block' && e.points && e.points.length >= 3);
@@ -1136,7 +1089,6 @@ const Tools = (function () {
       const name = block.name;
       const center = State.polygonCenter(block.points);
 
-      // 计算线中点处的法向，找对侧种子点
       const midIdx = Math.floor(lineSamples.length / 2);
       const mid = lineSamples[midIdx];
       const prev = lineSamples[Math.max(0, midIdx - 2)];
@@ -1153,12 +1105,10 @@ const Tools = (function () {
 
       State.removeEntity(block.id, true);
 
-      // 从原质心填充一侧
       const newPts1 = tryRefillAtWithFallback(center.x, center.y);
       if (newPts1 && newPts1.length >= 3) {
         State.addEntity({ type: 'block', category, name, points: newPts1 }, true);
       }
-      // 从对侧种子点填充另一侧
       const newPts2 = tryRefillAtWithFallback(otherSeed.x, otherSeed.y);
       if (newPts2 && newPts2.length >= 3) {
         const c2 = State.polygonCenter(newPts2);
