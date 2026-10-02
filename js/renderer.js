@@ -1,6 +1,7 @@
 /**
- * renderer.js — 画布渲染引擎
+ * renderer.js — 画布渲染引擎 v1.2.1
  * 多层套色道路、平涂用地、地块编号、选中态、绘制预览
+ * 30fps 渲染上限，降低毛玻璃重绘开销
  */
 'use strict';
 
@@ -13,13 +14,22 @@ const Renderer = (function () {
   let boundaryVisible = false;
   let offscreenCanvas = null;
   let renderScheduled = false;
+  let lastRenderTime = 0;
+  const MIN_FRAME_MS = 1000 / 30;
 
   function scheduleRender() {
     if (renderScheduled) return;
     renderScheduled = true;
     requestAnimationFrame(() => {
       renderScheduled = false;
-      render();
+      const now = performance.now();
+      const wait = MIN_FRAME_MS - (now - lastRenderTime);
+      if (wait > 0) {
+        setTimeout(() => { lastRenderTime = performance.now(); render(); }, wait);
+      } else {
+        lastRenderTime = now;
+        render();
+      }
     });
   }
 
@@ -27,10 +37,8 @@ const Renderer = (function () {
     if (!e.points || e.points.length === 0) return null;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const p of e.points) {
-      if (p.x < minX) minX = p.x;
-      if (p.y < minY) minY = p.y;
-      if (p.x > maxX) maxX = p.x;
-      if (p.y > maxY) maxY = p.y;
+      if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y;
     }
     return { minX, minY, maxX, maxY };
   }
@@ -43,10 +51,8 @@ const Renderer = (function () {
   }
 
   function init(canvasEl) {
-    canvas = canvasEl;
-    ctx = canvas.getContext('2d');
-    dpr = window.devicePixelRatio || 1;
-    resize();
+    canvas = canvasEl; ctx = canvas.getContext('2d');
+    dpr = window.devicePixelRatio || 1; resize();
   }
 
   function resize() {
@@ -67,22 +73,16 @@ const Renderer = (function () {
     if (!ctx || !canvas) return;
     const p = State.project;
     const { zoom, panX, panY } = p.view;
-
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const cw = canvas.clientWidth, ch = canvas.clientHeight;
-
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, cw, ch);
-
     const vx = -panX / zoom, vy = -panY / zoom;
     const vw = cw / zoom, vh = ch / zoom;
-
     ctx.save();
     ctx.translate(panX, panY);
     ctx.scale(zoom, zoom);
-
     if (State.isLayerVisible('basemap')) drawBasemap(ctx);
-
     if (State.isLayerVisible('water')) {
       for (const e of p.entities) {
         if (e.type !== 'water') continue;
@@ -130,13 +130,10 @@ const Renderer = (function () {
         drawAnnotation(ctx, e, zoom);
       }
     }
-
     if (previewProvider) previewProvider(ctx, zoom);
     if (calibrateLine) drawCalibrateLine(ctx, calibrateLine, zoom);
     if (guideLine) drawGuideLine(ctx, guideLine, zoom);
-
     ctx.restore();
-
     const sel = State.getSelected();
     if (sel) drawSelection(ctx, sel, zoom, panX, panY);
   }
@@ -172,9 +169,7 @@ const Renderer = (function () {
     octx.setTransform(dpr, 0, 0, dpr, 0, 0);
     octx.translate(panX, panY);
     octx.scale(zoom, zoom);
-    octx.lineCap = 'round';
-    octx.lineJoin = 'round';
-
+    octx.lineCap = 'round'; octx.lineJoin = 'round';
     for (const road of roads) {
       if (!road.points || road.points.length < 2) continue;
       const level = CONFIG.roadLevels[road.level] || CONFIG.roadLevels.local;
@@ -183,12 +178,10 @@ const Renderer = (function () {
       const pts = State.getRoadSamples(road);
       octx.strokeStyle = level.edgeColor;
       octx.lineWidth = W + level.edgeWidth * 2;
-      octx.beginPath();
-      octx.moveTo(pts[0].x, pts[0].y);
+      octx.beginPath(); octx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) octx.lineTo(pts[i].x, pts[i].y);
       octx.stroke();
     }
-
     octx.globalCompositeOperation = 'destination-out';
     for (const road of roads) {
       if (!road.points || road.points.length < 2) continue;
@@ -196,13 +189,11 @@ const Renderer = (function () {
       const W = level.width / State.project.meterPerPixel;
       const pts = State.getRoadSamples(road);
       octx.lineWidth = W;
-      octx.beginPath();
-      octx.moveTo(pts[0].x, pts[0].y);
+      octx.beginPath(); octx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) octx.lineTo(pts[i].x, pts[i].y);
       octx.stroke();
     }
     octx.globalCompositeOperation = 'source-over';
-
     for (const road of roads) {
       if (!road.points || road.points.length < 2) continue;
       const level = CONFIG.roadLevels[road.level] || CONFIG.roadLevels.local;
@@ -211,13 +202,11 @@ const Renderer = (function () {
       octx.strokeStyle = level.centerColor;
       octx.lineWidth = Math.max(0.3, level.centerWidth);
       octx.setLineDash(CONFIG.redDashPattern);
-      octx.beginPath();
-      octx.moveTo(pts[0].x, pts[0].y);
+      octx.beginPath(); octx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) octx.lineTo(pts[i].x, pts[i].y);
       octx.stroke();
       octx.setLineDash([]);
     }
-
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(off, 0, 0);
@@ -230,32 +219,17 @@ const Renderer = (function () {
     const mpp = State.project.meterPerPixel;
     const W = level.width / mpp;
     const pts = State.getRoadSamples(road);
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     if (layer === 'edge') {
       if (!level.edgeColor || level.edgeWidth <= 0) return;
-      ctx.strokeStyle = level.edgeColor;
-      ctx.lineWidth = W + level.edgeWidth * 2;
-      strokePts(ctx, pts);
-    } else if (layer === 'innerDash') {
-      if (!level.innerDash) return;
-      ctx.strokeStyle = level.innerDash;
-      ctx.lineWidth = W - 1;
-      ctx.setLineDash([8, 6]);
-      strokePts(ctx, pts);
-      ctx.setLineDash([]);
-    } else if (layer === 'body') {
-      ctx.strokeStyle = level.bodyColor;
-      ctx.lineWidth = Math.max(1, W);
+      ctx.strokeStyle = level.edgeColor; ctx.lineWidth = W + level.edgeWidth * 2;
       strokePts(ctx, pts);
     } else if (layer === 'center') {
       if (level.centerType === 'red-dashed' && level.centerWidth > 0) {
         ctx.strokeStyle = level.centerColor;
         ctx.lineWidth = Math.max(0.5, level.centerWidth);
         ctx.setLineDash(CONFIG.redDashPattern);
-        strokePts(ctx, pts);
-        ctx.setLineDash([]);
+        strokePts(ctx, pts); ctx.setLineDash([]);
       }
     }
   }
@@ -268,8 +242,7 @@ const Renderer = (function () {
     const mid = pts[Math.floor(pts.length / 2)];
     ctx.fillStyle = '#444';
     ctx.font = `${Math.max(9, W * 0.28)}px ${CONFIG.fangSong}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(road.name, mid.x, mid.y - W / 2 - 4);
   }
 
@@ -278,15 +251,12 @@ const Renderer = (function () {
     const r = Math.max(0.8, 1.5 / Math.max(0.5, zoom));
     for (const p of pts) {
       ctx.fillStyle = '#2ec27e';
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
     }
   }
 
   function strokePts(ctx, pts) {
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
+    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
     ctx.stroke();
   }
@@ -298,12 +268,10 @@ const Renderer = (function () {
     ctx.moveTo(e.points[0].x, e.points[0].y);
     for (let i = 1; i < e.points.length; i++) ctx.lineTo(e.points[i].x, e.points[i].y);
     ctx.closePath();
-    ctx.fillStyle = cat.color;
-    ctx.fill();
+    ctx.fillStyle = cat.color; ctx.fill();
     ctx.strokeStyle = darken(cat.color, 0.3);
     ctx.lineWidth = 0.15;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     ctx.stroke();
   }
 
@@ -314,10 +282,8 @@ const Renderer = (function () {
     const radius = Math.max(4.5, 6 / Math.max(0.5, zoom));
     const size = radius * 0.9;
     ctx.font = `${size}px ${CONFIG.kaiti}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.beginPath();
-    ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.beginPath(); ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
     ctx.strokeStyle = '#1a1a1a';
     ctx.lineWidth = Math.max(0.25, 0.35 / zoom);
     ctx.stroke();
@@ -330,14 +296,11 @@ const Renderer = (function () {
     const pts = b.curve === 'bezier' ? State.sampleSpline(b.points, CONFIG.splineSegments) : b.points;
     ctx.strokeStyle = '#4a4a4a';
     ctx.lineWidth = Math.max(0.6, 1.0 / zoom);
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.setLineDash([4, 3]);
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
+    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    ctx.stroke(); ctx.setLineDash([]);
   }
 
   function drawWater(ctx, w) {
@@ -346,77 +309,52 @@ const Renderer = (function () {
     ctx.moveTo(w.points[0].x, w.points[0].y);
     for (let i = 1; i < w.points.length; i++) ctx.lineTo(w.points[i].x, w.points[i].y);
     ctx.closePath();
-    ctx.fillStyle = '#b8d4e8';
-    ctx.fill();
-    ctx.strokeStyle = '#7aa8c8';
-    ctx.lineWidth = 1;
-    ctx.stroke();
+    ctx.fillStyle = '#b8d4e8'; ctx.fill();
+    ctx.strokeStyle = '#7aa8c8'; ctx.lineWidth = 1; ctx.stroke();
   }
 
   function drawAnnotation(ctx, a, zoom) {
     const size = (a.fontSize || 14) / Math.max(0.5, zoom);
     ctx.fillStyle = a.color || '#1a1a1a';
     ctx.font = `${a.bold ? 'bold ' : ''}${size}px ${CONFIG.fangSong}`;
-    ctx.textAlign = a.align || 'left';
-    ctx.textBaseline = 'top';
+    ctx.textAlign = a.align || 'left'; ctx.textBaseline = 'top';
     ctx.fillText(a.text || '', a.x, a.y);
   }
 
   function drawCalibrateLine(ctx, line, zoom) {
-    ctx.strokeStyle = '#d62b2b';
-    ctx.lineWidth = 2 / zoom;
+    ctx.strokeStyle = '#d62b2b'; ctx.lineWidth = 2 / zoom;
     ctx.setLineDash([6 / zoom, 4 / zoom]);
-    ctx.beginPath();
-    ctx.moveTo(line.x1, line.y1);
-    ctx.lineTo(line.x2, line.y2);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(line.x1, line.y1); ctx.lineTo(line.x2, line.y2); ctx.stroke();
     ctx.setLineDash([]);
     for (const [x, y] of [[line.x1, line.y1], [line.x2, line.y2]]) {
       ctx.fillStyle = '#d62b2b';
-      ctx.beginPath();
-      ctx.arc(x, y, 4 / zoom, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, 4 / zoom, 0, Math.PI * 2); ctx.fill();
     }
   }
 
   function drawGuideLine(ctx, gl, zoom) {
-    ctx.strokeStyle = '#ff6b35';
-    ctx.lineWidth = 1.2 / Math.max(0.5, zoom);
+    ctx.strokeStyle = '#ff6b35'; ctx.lineWidth = 1.2 / Math.max(0.5, zoom);
     ctx.setLineDash([5 / zoom, 3 / zoom]);
-    ctx.beginPath();
-    ctx.moveTo(gl.x1, gl.y1);
-    ctx.lineTo(gl.x2, gl.y2);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(gl.x1, gl.y1); ctx.lineTo(gl.x2, gl.y2); ctx.stroke();
     ctx.setLineDash([]);
     ctx.fillStyle = '#ff6b35';
-    ctx.beginPath();
-    ctx.arc(gl.x2, gl.y2, 3.5 / Math.max(0.5, zoom), 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(gl.x2, gl.y2, 3.5 / Math.max(0.5, zoom), 0, Math.PI * 2); ctx.fill();
   }
 
   function drawSelection(ctx, entity, zoom, panX, panY) {
     if (!entity.points) return;
     const isEdit = editModeRoadId === entity.id;
     if (!isEdit) return;
-
     const toScreen = p => ({ x: p.x * zoom + panX, y: p.y * zoom + panY });
     for (let i = 0; i < entity.points.length; i++) {
       const s = toScreen(entity.points[i]);
-      ctx.fillStyle = '#ff6b35';
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, 7, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#fff';
-      ctx.font = `bold 9px ${CONFIG.cadFont}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#ff6b35'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(s.x, s.y, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = `bold 9px ${CONFIG.cadFont}`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(String(i + 1), s.x, s.y);
     }
-    ctx.fillStyle = '#ff6b35';
-    ctx.font = `bold 11px ${CONFIG.cadFont}`;
+    ctx.fillStyle = '#ff6b35'; ctx.font = `bold 11px ${CONFIG.cadFont}`;
     ctx.textAlign = 'left';
     const first = toScreen(entity.points[0]);
     ctx.fillText('编辑节点：左键添加 / 右键删除 / 拖拽移动 / Enter 退出', first.x + 12, first.y - 12);
@@ -452,8 +390,7 @@ const Renderer = (function () {
         const W = lv.width / State.project.meterPerPixel;
         const pts = State.getRoadSamples(e);
         ctx.lineWidth = W;
-        ctx.beginPath();
-        ctx.moveTo(pts[0].x, pts[0].y);
+        ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
         for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
         ctx.stroke();
       }
