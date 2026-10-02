@@ -30,6 +30,7 @@ const Tools = (function () {
   let extendEnd = null; // 'start' | 'end' | null
   let contextMenuEl = null;
   let eraserActive = false;
+  let shiftPressed = false;
 
   const toolNames = {
     select: '选择/编辑', pan: '平移',
@@ -97,6 +98,24 @@ const Tools = (function () {
     if (ent.type === 'road') return State.getRoadSamples(ent);
     if (ent.curve === 'bezier') return State.sampleSpline(ent.points, CONFIG.splineSegments);
     return ent.points;
+  }
+
+  /** Shift 约束：将目标点吸附到水平/垂直/45°方向 */
+  function constrainToAxis(from, to) {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const adx = Math.abs(dx);
+    const ady = Math.abs(dy);
+    if (adx < 0.5 && ady < 0.5) return to;
+    const maxDim = Math.max(adx, ady);
+    // 45°：|dx| 与 |dy| 接近
+    if (Math.abs(adx - ady) < maxDim * 0.35) {
+      const avg = (adx + ady) / 2;
+      return { x: from.x + (dx >= 0 ? avg : -avg), y: from.y + (dy >= 0 ? avg : -avg) };
+    }
+    // 水平或垂直
+    if (adx > ady) return { x: to.x, y: from.y };
+    return { x: from.x, y: to.y };
   }
 
   function setTool(name) {
@@ -284,10 +303,12 @@ const Tools = (function () {
     // 延伸模式：点击空白处添加节点到对应端点
     if (extendEnd !== null) {
       State.recordUndo();
+      const endPoint = extendEnd === 'start' ? ent.points[0] : ent.points[ent.points.length - 1];
+      const target = shiftPressed ? constrainToAxis(endPoint, w) : w;
       if (extendEnd === 'start') {
-        ent.points.unshift({ x: w.x, y: w.y });
+        ent.points.unshift({ x: target.x, y: target.y });
       } else {
-        ent.points.push({ x: w.x, y: w.y });
+        ent.points.push({ x: target.x, y: target.y });
       }
       if (isRoad) State.trimTJunctions();
       refreshAdjacentBlocks(ent);
@@ -328,7 +349,7 @@ const Tools = (function () {
     if (isDragging && dragStart) {
       const dx = e.clientX - dragStart.x, dy = e.clientY - dragStart.y;
       State.setView({ panX: dragStart.panX + dx, panY: dragStart.panY + dy }, true);
-      Renderer.render();
+      Renderer.scheduleRender();
       return;
     }
 
@@ -338,7 +359,7 @@ const Tools = (function () {
       if (ent && ent.points) {
         ent.points[vertexDrag.pointIndex] = { x: w.x, y: w.y };
         if (ent.type === 'road') State.trimTJunctions();
-        Renderer.render();
+        Renderer.scheduleRender();
       }
       return;
     }
@@ -382,7 +403,7 @@ const Tools = (function () {
           }
           ctx.globalAlpha = 1;
         });
-        Renderer.render();
+        Renderer.scheduleRender();
       }
       return;
     }
@@ -392,7 +413,7 @@ const Tools = (function () {
       const ent = State.getEntity(entityDrag.entityId);
       if (ent && ent.points) {
         for (const p of ent.points) { p.x = w.x + entityDrag.offsetX; p.y = w.y + entityDrag.offsetY; }
-        Renderer.render();
+        Renderer.scheduleRender();
       }
       return;
     }
@@ -409,12 +430,16 @@ const Tools = (function () {
 
     if (current === 'calibrate' && calibrateStart && isDragging) {
       Renderer.setCalibrateLine({ x1: calibrateStart.x, y1: calibrateStart.y, x2: w.x, y2: w.y });
-      Renderer.render();
+      Renderer.scheduleRender();
       return;
     }
 
     if ((current === 'road-bezier' || current === 'road-polyline' || current === 'road-ramp' || current === 'boundary' || current === 'district-polygon') && drawing) {
-      drawing.previewPoint = w;
+      if (shiftPressed && drawing.points.length > 0) {
+        drawing.previewPoint = constrainToAxis(drawing.points[drawing.points.length - 1], w);
+      } else {
+        drawing.previewPoint = w;
+      }
       updatePreview();
     }
   }
@@ -464,7 +489,8 @@ const Tools = (function () {
         drawing = { type, level, curve, name: options.roadName, points: [{ x: w.x, y: w.y }], previewPoint: w };
       } else {
         const last = drawing.points[drawing.points.length - 1];
-        if (Math.hypot(w.x - last.x, w.y - last.y) > 1) drawing.points.push({ x: w.x, y: w.y });
+        const target = shiftPressed ? constrainToAxis(last, w) : w;
+        if (Math.hypot(target.x - last.x, target.y - last.y) > 1) drawing.points.push({ x: target.x, y: target.y });
       }
       updatePreview();
     } else if (current === 'district-polygon') {
@@ -667,7 +693,7 @@ const Tools = (function () {
 
   /* ── 预览绘制 ──────────────────────────────────── */
   function updatePreview() {
-    if (!drawing) { Renderer.setPreview(null); Renderer.render(); return; }
+    if (!drawing) { Renderer.setPreview(null); Renderer.scheduleRender(); return; }
     Renderer.setPreview((ctx, zoom) => {
       if (drawing.type === 'road' || drawing.type === 'boundary') {
         const pts = drawing.curve === 'bezier' ? State.sampleSpline(drawing.points, CONFIG.splineSegments) : drawing.points;
@@ -729,7 +755,7 @@ const Tools = (function () {
         }
       }
     });
-    Renderer.render();
+    Renderer.scheduleRender();
   }
 
   function strokePreview(ctx, pts, previewPoint) {
@@ -801,6 +827,7 @@ const Tools = (function () {
   /* ── 键盘 ──────────────────────────────────────── */
   function onKeyDown(e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+    if (e.key === 'Shift') { shiftPressed = true; return; }
     if (e.code === 'Space') { spacePan = true; e.preventDefault(); return; }
     if (e.key === 'Enter') {
       if (drawing) { e.preventDefault(); finishByEnter(); return; }
@@ -831,7 +858,10 @@ const Tools = (function () {
     if (keyMap[e.key]) setTool(keyMap[e.key]);
   }
 
-  function onKeyUp(e) { if (e.code === 'Space') spacePan = false; }
+  function onKeyUp(e) {
+    if (e.key === 'Shift') { shiftPressed = false; return; }
+    if (e.code === 'Space') spacePan = false;
+  }
 
   /* ── 滚轮缩放 ──────────────────────────────────── */
   function onWheel(e) {
@@ -843,7 +873,7 @@ const Tools = (function () {
     const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
     const newZoom = Math.max(CONFIG.minZoom, Math.min(CONFIG.maxZoom, view.zoom * factor));
     State.setView({ zoom: newZoom, panX: sx - wx * newZoom, panY: sy - wy * newZoom }, true);
-    Renderer.render();
+    Renderer.scheduleRender();
     zoomListeners.forEach(fn => fn(newZoom));
   }
 
