@@ -5,6 +5,9 @@
 'use strict';
 
 const CONFIG = {
+  /* ── 版本 ────────────────────────────────────── */
+  version: 'v1.0.11',
+
   /* ── 字体栈 ────────────────────────────────────── */
   cadFont: '"Courier New","Consolas","Liberation Mono",monospace',
   fangSong: '"FangSong","仿宋","STFangsong","SimSun",serif',
