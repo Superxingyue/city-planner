@@ -264,7 +264,7 @@ const Renderer = (function () {
     ctx.fill();
     // 细边框（同色系加深）
     ctx.strokeStyle = darken(cat.color, 0.3);
-    ctx.lineWidth = 0.8;
+    ctx.lineWidth = 0.4;
     ctx.stroke();
   }
 
@@ -366,75 +366,36 @@ const Renderer = (function () {
     ctx.fill();
   }
 
-  /* ── 选中态 ────────────────────────────────────── */
+  /* ── 选中态 ──────────────────────────────────────
+     非编辑模式：不画任何标记（用户不喜欢蓝框蓝点）
+     编辑模式（右键道路/边界）：画橙色节点 */
   function drawSelection(ctx, entity, zoom, panX, panY) {
     if (!entity.points) return;
-    const toScreen = p => ({ x: p.x * zoom + panX, y: p.y * zoom + panY });
     const isEdit = editModeRoadId === entity.id;
+    if (!isEdit) return; // 非编辑模式无视觉反馈
 
-    // 街区：只画虚线轮廓，不画顶点手柄（不可直接编辑形状）
-    if (entity.type === 'block' && !isEdit) {
-      ctx.save();
-      ctx.translate(panX, panY);
-      ctx.scale(zoom, zoom);
-      ctx.strokeStyle = 'rgba(33, 150, 243, 0.85)';
-      ctx.lineWidth = 1.5 / zoom;
-      ctx.setLineDash([4 / zoom, 3 / zoom]);
-      ctx.beginPath();
-      ctx.moveTo(entity.points[0].x, entity.points[0].y);
-      for (let i = 1; i < entity.points.length; i++) ctx.lineTo(entity.points[i].x, entity.points[i].y);
-      ctx.closePath();
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.restore();
-      return;
-    }
-
-    if (!isEdit) {
-      const bbox = State.getBBox(entity);
-      if (bbox) {
-        const tl = toScreen({ x: bbox.x, y: bbox.y });
-        ctx.strokeStyle = '#2196f3';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([5, 3]);
-        ctx.strokeRect(tl.x - 4, tl.y - 4, bbox.w * zoom + 8, bbox.h * zoom + 8);
-        ctx.setLineDash([]);
-      }
-    }
-    // 顶点
+    const toScreen = p => ({ x: p.x * zoom + panX, y: p.y * zoom + panY });
+    // 编辑模式：橙色节点
     for (let i = 0; i < entity.points.length; i++) {
       const s = toScreen(entity.points[i]);
-      if (isEdit) {
-        // 编辑模式：大节点，右键删除
-        ctx.fillStyle = '#ff6b35';
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(s.x, s.y, 7, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = '#fff';
-        ctx.font = `bold 9px ${CONFIG.cadFont}`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(String(i + 1), s.x, s.y);
-      } else {
-        ctx.fillStyle = '#2196f3';
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(s.x, s.y, 5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-      }
-    }
-    if (isEdit) {
       ctx.fillStyle = '#ff6b35';
-      ctx.font = `bold 11px ${CONFIG.cadFont}`;
-      ctx.textAlign = 'left';
-      const first = toScreen(entity.points[0]);
-      ctx.fillText('编辑节点：左键添加 / 右键删除 / 拖拽移动 / Enter 退出', first.x + 12, first.y - 12);
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.font = `bold 9px ${CONFIG.cadFont}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(i + 1), s.x, s.y);
     }
+    ctx.fillStyle = '#ff6b35';
+    ctx.font = `bold 11px ${CONFIG.cadFont}`;
+    ctx.textAlign = 'left';
+    const first = toScreen(entity.points[0]);
+    ctx.fillText('编辑节点：左键添加 / 右键删除 / 拖拽移动 / Enter 退出', first.x + 12, first.y - 12);
   }
 
   function darken(hex, amount) {

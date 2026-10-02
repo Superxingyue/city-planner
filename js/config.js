@@ -83,8 +83,8 @@ const CONFIG = {
     },
   },
   roadLevelOrder: ['expressway', 'arterial', 'collector', 'local', 'ramp'],
-  /* 点划线线型：长划-空-点-空 */
-  redDashPattern: [12, 4, 2, 4],
+  /* 点划线线型：长划-空-点-空（加密版） */
+  redDashPattern: [6, 2, 1, 2],
 
   /* ── 城市用地分类 ──────────────────────────────────
      代码依据 GB 50137-2011；配色参照真实规划总图 */
