@@ -1,7 +1,5 @@
 /**
  * state.js — 工程状态管理 + 几何工具
- * 负责：项目数据、图层显隐、实体增删改、撤销/重做、变更通知
- *       洪水填充、轮廓追踪、道格拉斯-普克简化、Catmull-Rom 曲线采样
  */
 'use strict';
 
@@ -29,11 +27,9 @@ const State = (function () {
 
   CONFIG.layers.forEach(l => { layerVisibility[l.id] = true; });
 
-  /* ── 变更通知 ─────────────────────────────────── */
   function onChange(fn) { listeners.push(fn); }
   function emit() { listeners.forEach(fn => fn()); }
 
-  /* ── 快照 / 撤销 ───────────────────────────────── */
   function snapshot() {
     return {
       name: project.name, scale: project.scale, meterPerPixel: project.meterPerPixel,
@@ -70,7 +66,6 @@ const State = (function () {
   function canUndo() { return undoStack.length > 0; }
   function canRedo() { return redoStack.length > 0; }
 
-  /* ── 实体操作 ──────────────────────────────────── */
   function genId() { return 'e' + (project.nextId++); }
   function nextPlotNumber() { return ++plotCounter; }
 
@@ -98,7 +93,6 @@ const State = (function () {
   function getSelected() { return selectedId ? getEntity(selectedId) : null; }
   function setSelected(id) { selectedId = id; emit(); }
 
-  /* ── 图层 ──────────────────────────────────────── */
   function isLayerVisible(layerId) { return !!layerVisibility[layerId]; }
   function setLayerVisible(layerId, visible) { layerVisibility[layerId] = visible; emit(); }
   function entityLayer(entity) {
@@ -109,7 +103,6 @@ const State = (function () {
     return null;
   }
 
-  /* ── 视图 / 底图 / 项目 ────────────────────────── */
   function setView(patch, silent) { Object.assign(project.view, patch); if (!silent) emit(); }
   function setBasemap(patch, skipUndo) {
     if (!skipUndo) recordUndo();
@@ -144,10 +137,6 @@ const State = (function () {
     return d;
   }
 
-  /* ══════════════════════════════════════════════════
-     几何工具
-     ══════════════════════════════════════════════════ */
-
   function getBBox(entity) {
     if (!entity || !entity.points || entity.points.length === 0) return null;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -158,7 +147,6 @@ const State = (function () {
     return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
   }
 
-  /** 多边形面积加权质心（shoelace 公式），比顶点平均更接近视觉中心 */
   function polygonCenter(points) {
     if (!points || points.length < 3) {
       if (!points || points.length === 0) return { x: 0, y: 0 };
@@ -185,7 +173,6 @@ const State = (function () {
     return { x: cx, y: cy };
   }
 
-  /** 多边形有符号面积（shoelace） */
   function polygonArea(points) {
     if (!points || points.length < 3) return 0;
     let area = 0;
@@ -225,7 +212,6 @@ const State = (function () {
     return min;
   }
 
-  /** Chaikin 曲线平滑 */
   function smoothChaikin(points, iterations) {
     if (points.length < 3) return points.slice();
     let pts = points.slice();
@@ -241,11 +227,32 @@ const State = (function () {
     return pts;
   }
 
-  /** Catmull-Rom 样条采样（贝塞尔平滑路） */
+  function smoothChaikinClosed(points, iterations) {
+    if (points.length < 4) return points.slice();
+    let pts = points.slice();
+    if (pts.length > 1 && pts[0].x === pts[pts.length - 1].x && pts[0].y === pts[pts.length - 1].y) {
+      pts.pop();
+    }
+    const n = pts.length;
+    if (n < 3) return points.slice();
+    for (let it = 0; it < iterations; it++) {
+      const out = [];
+      for (let i = 0; i < n; i++) {
+        const p0 = pts[i];
+        const p1 = pts[(i + 1) % n];
+        out.push({ x: 0.75 * p0.x + 0.25 * p1.x, y: 0.75 * p0.y + 0.25 * p1.y });
+        out.push({ x: 0.25 * p0.x + 0.75 * p1.x, y: 0.25 * p0.y + 0.75 * p1.y });
+      }
+      pts = out;
+    }
+    pts.push({ x: pts[0].x, y: pts[0].y });
+    return pts;
+  }
+
   function sampleSpline(anchors, segmentsPerSpan) {
     if (anchors.length < 2) return anchors.slice();
     if (anchors.length === 2) return anchors.slice();
-    const pts = [anchors[0], ...anchors, anchors[anchors.length - 1]]; // 端点复制
+    const pts = [anchors[0], ...anchors, anchors[anchors.length - 1]];
     const result = [];
     const seg = segmentsPerSpan || CONFIG.splineSegments;
     for (let i = 0; i < pts.length - 3; i++) {
@@ -262,12 +269,10 @@ const State = (function () {
     return result;
   }
 
-  /** 获取道路的渲染采样点（折线直接返回，贝塞尔采样） */
-  const sampleCache = new Map(); // id -> { sig, pts }
+  const sampleCache = new Map();
 
   function getRoadSamples(road) {
     if (road.curve !== 'bezier' || road.points.length < 2) return road.points;
-    // 缓存签名：包含所有点坐标（拖动任意节点都能使缓存失效）
     const pts = road.points;
     let sig = pts.length + '|';
     for (let i = 0; i < pts.length; i++) {
@@ -280,7 +285,6 @@ const State = (function () {
     return sampled;
   }
 
-  /** 道格拉斯-普克多边形简化 */
   function simplifyDP(points, tolerance) {
     if (points.length < 3) return points.slice();
     let maxDist = 0, maxIdx = 0;
@@ -297,12 +301,6 @@ const State = (function () {
     return [first, last];
   }
 
-  /**
-   * 洪水填充 + 轮廓追踪：在离屏画布上以道路为边界，从种子点填充并返回轮廓多边形
-   * @param {CanvasRenderingContext2D} boundaryCtx - 已绘制道路为黑色的离屏上下文
-   * @param {number} seedX, seedY - 种子点（离屏画布像素坐标）
-   * @returns {{points: Array, leaked: boolean}} 轮廓点 + 是否泄漏到边界
-   */
   function floodFillContour(boundaryCtx, seedX, seedY) {
     const canvas = boundaryCtx.canvas;
     const W = canvas.width, H = canvas.height;
@@ -311,12 +309,8 @@ const State = (function () {
     const visited = new Uint8Array(W * H);
     const sx = Math.floor(seedX), sy = Math.floor(seedY);
     if (sx < 0 || sx >= W || sy < 0 || sy >= H) return { points: [], leaked: true };
-
-    // 检查种子点是否在道路上
     const seedIdx = (sy * W + sx) * 4;
     if (data[seedIdx] < 128) return { points: [], leaked: true };
-
-    // 洪水填充（栈式扫描）
     const stack = [sx, sy];
     let leaked = false;
     let filledCount = 0;
@@ -326,21 +320,18 @@ const State = (function () {
       const idx = y * W + x;
       if (visited[idx]) continue;
       const di = idx * 4;
-      if (data[di] < 128) continue; // 道路边界
+      if (data[di] < 128) continue;
       visited[idx] = 1;
       filledCount++;
       if (x === 0 || x === W - 1 || y === 0 || y === H - 1) leaked = true;
       stack.push(x + 1, y, x - 1, y, x, y + 1, x, y - 1);
     }
     if (filledCount < 4) return { points: [], leaked: true };
-
-    // 寻找轮廓起点（最上方最左方的边界像素）
     let startX = -1, startY = -1;
     outer:
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
         if (visited[y * W + x]) {
-          // 检查是否有未填充邻居
           if (x === 0 || y === 0 || x === W - 1 || y === H - 1 ||
               !visited[y * W + x - 1] || !visited[y * W + x + 1] ||
               !visited[(y - 1) * W + x] || !visited[(y + 1) * W + x]) {
@@ -350,13 +341,11 @@ const State = (function () {
       }
     }
     if (startX < 0) return { points: [], leaked };
-
-    // Moore 邻域轮廓追踪（顺时针）
     const dx = [0, 1, 1, 1, 0, -1, -1, -1];
     const dy = [-1, -1, 0, 1, 1, 1, 0, -1];
     const contour = [[startX, startY]];
     let x = startX, y = startY;
-    let searchDir = 6; // 从西方开始顺时针搜索
+    let searchDir = 6;
     let guard = 0;
     const maxGuard = W * H * 4;
     while (guard++ < maxGuard) {
@@ -373,7 +362,6 @@ const State = (function () {
       }
       if (!found) break;
       if (x === startX && y === startY) break;
-      // 稀疏采样，减少点数
       if (contour.length === 0 ||
           Math.abs(x - contour[contour.length - 1][0]) + Math.abs(y - contour[contour.length - 1][1]) >= 2) {
         contour.push([x, y]);
@@ -382,11 +370,6 @@ const State = (function () {
     return { points: contour, leaked };
   }
 
-  /* ══════════════════════════════════════════════════
-     路口检测与道路修剪
-     ══════════════════════════════════════════════════ */
-
-  /** 两线段交点，返回 {x,y,t1,t2} 或 null */
   function segIntersect(p1, p2, p3, p4) {
     const d1x = p2.x - p1.x, d1y = p2.y - p1.y;
     const d2x = p4.x - p3.x, d2y = p4.y - p3.y;
@@ -398,11 +381,9 @@ const State = (function () {
     return { x: p1.x + t1 * d1x, y: p1.y + t1 * d1y, t1, t2 };
   }
 
-  /** 求两条道路采样线的所有交点（含bbox快速排斥） */
   function roadIntersections(roadA, roadB) {
     const ptsA = getRoadSamples(roadA);
     const ptsB = getRoadSamples(roadB);
-    // bbox 快速排斥：不相交直接返回空
     let minAX = Infinity, minAY = Infinity, maxAX = -Infinity, maxAY = -Infinity;
     let minBX = Infinity, minBY = Infinity, maxBX = -Infinity, maxBY = -Infinity;
     for (const p of ptsA) { if (p.x < minAX) minAX = p.x; if (p.x > maxAX) maxAX = p.x; if (p.y < minAY) minAY = p.y; if (p.y > maxAY) maxAY = p.y; }
@@ -418,19 +399,16 @@ const State = (function () {
     return hits;
   }
 
-  /** 检测所有道路交点（用于绿点标记） */
   function getAllIntersections() {
     const roads = project.entities.filter(e => e.type === 'road' && e.points && e.points.length >= 2);
     const pts = [];
     const mpp = project.meterPerPixel;
-    // 1. 十字路口：中心线相交
     for (let i = 0; i < roads.length; i++) {
       for (let j = i + 1; j < roads.length; j++) {
         const hits = roadIntersections(roads[i], roads[j]);
         for (const h of hits) pts.push({ x: h.x, y: h.y });
       }
     }
-    // 2. 丁字路口：端点贴在另一条路体上，绿点放在另一条路中心线上
     for (const road of roads) {
       const rPts = getRoadSamples(road);
       if (rPts.length < 2) continue;
@@ -444,7 +422,6 @@ const State = (function () {
           const otherLevel = CONFIG.roadLevels[other.level] || CONFIG.roadLevels.local;
           const otherHalfW = otherLevel.width / mpp / 2;
           if (distToPolyline(ep.x, ep.y, otherPts) < otherHalfW + halfW * 0.5) {
-            // 找到端点在另一条路中心线上的最近点
             const closest = closestPointOnPolyline(ep.x, ep.y, otherPts);
             pts.push({ x: closest.x, y: closest.y });
             break;
@@ -455,7 +432,6 @@ const State = (function () {
     return pts;
   }
 
-  /** 求点到折线的最近点 */
   function closestPointOnPolyline(px, py, points) {
     let best = { x: points[0].x, y: points[0].y }, bestD = Infinity;
     for (let i = 0; i < points.length - 1; i++) {
@@ -472,7 +448,6 @@ const State = (function () {
     return best;
   }
 
-  /** 检测并修剪丁字路口：端点落在另一条路体内则截断到中心线附近（红线相交但不出头） */
   function trimTJunctions() {
     const roads = project.entities.filter(e => e.type === 'road' && e.points && e.points.length >= 2);
     let changed = false;
@@ -482,7 +457,6 @@ const State = (function () {
       const halfW = level.width / mpp / 2;
       const pts = getRoadSamples(road);
       if (pts.length < 2) continue;
-
       for (const endpointIdx of [0, pts.length - 1]) {
         const ep = pts[endpointIdx];
         for (const other of roads) {
@@ -492,9 +466,7 @@ const State = (function () {
           const otherLevel = CONFIG.roadLevels[other.level] || CONFIG.roadLevels.local;
           const otherHalfW = otherLevel.width / mpp / 2;
           const d = distToPolyline(ep.x, ep.y, otherPts);
-          // 端点在另一条路体内
           if (d < otherHalfW + halfW * 0.5) {
-            // 找道路上距离另一条路中心线约1px的点（红线相交但不出头）
             const targetDist = 1.0;
             const dir = endpointIdx === 0 ? 1 : -1;
             const start = endpointIdx === 0 ? 0 : pts.length - 1;
@@ -505,7 +477,6 @@ const State = (function () {
               if (dCur >= targetDist) { trimPoint = cur; break; }
             }
             if (!trimPoint) {
-              // 整条路都在另一条路内，用离中心线最近的点
               let bestD = Infinity, bestP = null;
               for (const cur of pts) {
                 const dCur = distToPolyline(cur.x, cur.y, otherPts);
@@ -526,14 +497,8 @@ const State = (function () {
     return changed;
   }
 
-  /* ══════════════════════════════════════════════════
-     多边形拆分（街区拆分器）
-     ══════════════════════════════════════════════════ */
-
-  /** 用曲线拆分多边形，返回两个新多边形或 null */
   function splitPolygonByCurve(poly, curvePts) {
     if (poly.length < 3 || curvePts.length < 2) return null;
-    // 找曲线与多边形边界的所有交点
     const intersections = [];
     for (let ci = 0; ci < curvePts.length - 1; ci++) {
       for (let pi = 0; pi < poly.length; pi++) {
@@ -545,35 +510,26 @@ const State = (function () {
       }
     }
     if (intersections.length < 2) return null;
-
-    // 按曲线上的位置排序交点
     intersections.sort((a, b) => (a.curveIdx + a.t) - (b.curveIdx + b.t));
     const i1 = intersections[0], i2 = intersections[intersections.length - 1];
-
-    // 构建两个多边形
-    // poly1: 从 i1 沿多边形正向到 i2，再沿曲线反向回 i1
-    // poly2: 从 i2 沿多边形正向到 i1，再沿曲线反向回 i2
     const curveSeg = [];
     for (let ci = i1.curveIdx; ci <= i2.curveIdx; ci++) {
       curveSeg.push(curvePts[ci]);
     }
     curveSeg.push({ x: i2.x, y: i2.y });
     curveSeg.unshift({ x: i1.x, y: i1.y });
-
     const poly1 = [{ x: i1.x, y: i1.y }];
     for (let pi = (i1.polyIdx + 1) % poly.length; pi !== (i2.polyIdx + 1) % poly.length; pi = (pi + 1) % poly.length) {
       poly1.push(poly[pi]);
     }
     poly1.push({ x: i2.x, y: i2.y });
     for (let ci = curveSeg.length - 2; ci >= 1; ci--) poly1.push(curveSeg[ci]);
-
     const poly2 = [{ x: i2.x, y: i2.y }];
     for (let pi = (i2.polyIdx + 1) % poly.length; pi !== (i1.polyIdx + 1) % poly.length; pi = (pi + 1) % poly.length) {
       poly2.push(poly[pi]);
     }
     poly2.push({ x: i1.x, y: i1.y });
     for (let ci = 1; ci < curveSeg.length - 1; ci++) poly2.push(curveSeg[ci]);
-
     if (poly1.length < 3 || poly2.length < 3) return null;
     return [poly1, poly2];
   }
@@ -589,7 +545,7 @@ const State = (function () {
     setView, setBasemap, setBasemapImage, getBasemapImage,
     setProjectMeta, newProject, loadProject, exportProject,
     getBBox, polygonCenter, polygonArea, pointInPolygon, distToPolyline,
-    smoothChaikin, sampleSpline, getRoadSamples, simplifyDP,
+    smoothChaikin, smoothChaikinClosed, sampleSpline, getRoadSamples, simplifyDP,
     floodFillContour,
     getAllIntersections, trimTJunctions, splitPolygonByCurve,
   };
