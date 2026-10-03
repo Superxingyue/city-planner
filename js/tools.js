@@ -1,6 +1,6 @@
 /**
- * tools.js — 绘制工具与交互 v1.3.0
- * 左键绘制+回车完成 · 右键编辑节点 · 铁路/地铁 · 低质量拖拽
+ * tools.js — 绘制工具与交互
+ * 左键绘制+回车完成 · 右键菜单(编辑/删除) · 街区拆分 · 路口自动修剪
  */
 'use strict';
 
@@ -9,31 +9,20 @@ const Tools = (function () {
   let current = 'select';
   let options = {
     roadLevel: 'arterial', roadName: '',
-    railwayLevel: 'trunk', railwayName: '',
-    metroLineId: 'M1', metroName: '',
     landUseCode: 'R2', districtName: '',
     annotationText: '标注', annotationSize: 16,
   };
-  let drawing = null;
-  let isDragging = false;
-  let dragStart = null;
-  let vertexDrag = null;
-  let entityDrag = null;
-  let dragUndoRecorded = false;
-  let spacePan = false;
-  let calibrateStart = null;
-  let mouseDownPos = null;
-  let mouseDownTime = 0;
-  let editModeRoadId = null;
-  let extendEnd = null;
-  let contextMenuEl = null;
-  let eraserActive = false;
-  let shiftPressed = false;
+  let drawing = null, isDragging = false, dragStart = null;
+  let vertexDrag = null, entityDrag = null, dragUndoRecorded = false;
+  let spacePan = false, calibrateStart = null;
+  let mouseDownPos = null, mouseDownTime = 0;
+  let editModeRoadId = null, extendEnd = null;
+  let contextMenuEl = null, eraserActive = false, shiftPressed = false;
 
   const toolNames = {
     select: '选择/编辑', pan: '平移',
-    'road-bezier': '道路(贝塞尔)', 'road-polyline': '道路(折线)', 'road-ramp': '匝道',
-    railway: '铁路', metro: '地铁',
+    'road-bezier': '道路(贝塞尔)', 'road-polyline': '道路(折线)',
+    'road-ramp': '匝道',
     'block-fill': '街区填充', boundary: '划定街区边界',
     eraser: '橡皮擦', 'block-clear': '街区清除',
     'district-polygon': '片区(多边形)', 'district-rect': '片区(矩形)',
@@ -58,17 +47,20 @@ const Tools = (function () {
   function createContextMenu() {
     contextMenuEl = document.createElement('div');
     contextMenuEl.id = 'contextMenu';
-    contextMenuEl.style.cssText = 'position:fixed;z-index:9999;display:none;background:#fff;border:1px solid #ccc;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.18);min-width:140px;padding:4px 0;font-size:13px;';
+    contextMenuEl.style.cssText = 'position:fixed;z-index:9999;display:none;background:rgba(255,255,255,0.88);backdrop-filter:blur(14px) saturate(1.3);-webkit-backdrop-filter:blur(14px) saturate(1.3);border:1px solid rgba(0,0,0,0.1);border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,0.15);min-width:140px;padding:4px 0;font-size:13px;';
     document.body.appendChild(contextMenuEl);
     document.addEventListener('click', () => hideContextMenu());
   }
 
   function showContextMenu(x, y, items) {
     contextMenuEl.innerHTML = items.map(it =>
-      `<div class="ctx-item" data-action="${it.action}" style="padding:7px 16px;cursor:pointer;${it.danger ? 'color:#d32f2f;' : ''}">${it.label}</div>`
+      `<div class="ctx-item" data-action="${it.action}" style="padding:8px 16px;cursor:pointer;${it.danger ? 'color:#c0392b;' : ''}">${it.label}</div>`
     ).join('');
-    contextMenuEl.style.left = x + 'px';
-    contextMenuEl.style.top = y + 'px';
+    const menuW = 160, menuH = items.length * 36 + 8;
+    const px = Math.min(x, window.innerWidth - menuW);
+    const py = Math.min(y, window.innerHeight - menuH);
+    contextMenuEl.style.left = px + 'px';
+    contextMenuEl.style.top = py + 'px';
     contextMenuEl.style.display = 'block';
     contextMenuEl.querySelectorAll('.ctx-item').forEach(el => {
       el.addEventListener('click', () => {
@@ -77,7 +69,7 @@ const Tools = (function () {
         const item = items.find(i => i.action === action);
         if (item && item.onClick) item.onClick();
       });
-      el.addEventListener('mouseenter', () => el.style.background = '#f0f4ff');
+      el.addEventListener('mouseenter', () => el.style.background = 'rgba(0,0,0,0.06)');
       el.addEventListener('mouseleave', () => el.style.background = '');
     });
   }
@@ -180,12 +172,17 @@ const Tools = (function () {
         for (let i = 0; i < ent.points.length; i++) {
           const p = ent.points[i];
           if (Math.hypot(w.x - p.x, w.y - p.y) * State.project.view.zoom < CONFIG.vertexHitRadius + 2) {
-            if (ent.points.length <= 2) { UI.Modal.alert('至少需要2个节点'); return; }
-            State.recordUndo();
-            ent.points.splice(i, 1);
-            extendEnd = null; Renderer.setGuideLine(null);
-            if (ent.type === 'road') { State.trimTJunctions(); refreshAdjacentBlocks(ent); }
-            Renderer.render(); return;
+            showContextMenu(e.clientX, e.clientY, [
+              { label: '删除此节点', action: 'delNode', danger: true, onClick: () => {
+                if (ent.points.length <= 2) { UI.Modal.alert('至少需要2个节点'); return; }
+                State.recordUndo();
+                ent.points.splice(i, 1);
+                extendEnd = null; Renderer.setGuideLine(null);
+                if (ent.type === 'road') { State.trimTJunctions(); refreshAdjacentBlocks(ent); }
+                Renderer.render();
+              }},
+            ]);
+            return;
           }
         }
       }
@@ -194,27 +191,37 @@ const Tools = (function () {
     const hit = hitTest(w);
     if (hit) {
       State.setSelected(hit.id);
-      if (hit.type === 'road' || hit.type === 'boundary' || hit.type === 'railway' || hit.type === 'metro') {
-        editModeRoadId = hit.id; Renderer.setEditMode(hit.id); Renderer.render();
+      const items = [];
+      if (hit.type === 'road' || hit.type === 'boundary') {
+        items.push({ label: '编辑节点', action: 'edit', onClick: () => {
+          editModeRoadId = hit.id; Renderer.setEditMode(hit.id); Renderer.render();
+        }});
+        items.push({ label: '删除', action: 'del', danger: true, onClick: () => {
+          State.removeEntity(hit.id); Renderer.render();
+        }});
       } else {
-        const items = [{ label: '删除', action: 'del', danger: true, onClick: () => { State.removeEntity(hit.id); Renderer.render(); } }];
         if (hit.type === 'block' || hit.type === 'district') {
-          items.unshift({ label: '更改用地分类…', action: 'cat', onClick: () => {
+          items.push({ label: '更改用地分类…', action: 'cat', onClick: () => {
             UI.Modal.prompt('输入用地分类代码（如 R2、B1、G1）：', hit.category || 'R2').then(input => {
               if (input) { State.updateEntity(hit.id, { category: input.trim() }); Renderer.render(); }
             });
           }});
         }
         if (hit.type === 'annotation') {
-          items.unshift({ label: '编辑文字…', action: 'text', onClick: () => {
+          items.push({ label: '编辑文字…', action: 'text', onClick: () => {
             UI.Modal.prompt('标注文字：', hit.text || '').then(text => {
               if (text !== null) { State.updateEntity(hit.id, { text }); Renderer.render(); }
             });
           }});
         }
-        showContextMenu(e.clientX, e.clientY, items);
+        items.push({ label: '删除', action: 'del', danger: true, onClick: () => {
+          State.removeEntity(hit.id); Renderer.render();
+        }});
       }
-    } else { State.setSelected(null); Renderer.render(); }
+      showContextMenu(e.clientX, e.clientY, items);
+    } else {
+      State.setSelected(null); Renderer.render();
+    }
   }
 
   function handleEditModeClick(w, e) {
@@ -276,12 +283,8 @@ const Tools = (function () {
         else tempPts = [...ent.points, { x: w.x, y: w.y }];
         const sampled = State.sampleSpline(tempPts, CONFIG.splineSegments);
         const isRoad = ent.type === 'road';
-        const isRailway = ent.type === 'railway';
-        const isMetro = ent.type === 'metro';
         const level = isRoad ? (CONFIG.roadLevels[ent.level] || CONFIG.roadLevels.local) : null;
-        const rwLevel = isRailway ? (CONFIG.railwayLevels[ent.level] || CONFIG.railwayLevels.trunk) : null;
-        const metroCfg = isMetro ? (CONFIG.metroLines.find(l => l.id === ent.lineId) || { color: '#666' }) : null;
-        const W = level ? level.width / State.project.meterPerPixel : (isRailway ? rwLevel.width : CONFIG.metroWidth);
+        const W = level ? level.width / State.project.meterPerPixel : 0;
         Renderer.setPreview((ctx, zoom) => {
           ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.globalAlpha = 0.7;
           if (isRoad) {
@@ -293,11 +296,6 @@ const Tools = (function () {
               ctx.strokeStyle = level.centerColor; ctx.lineWidth = Math.max(0.3, level.centerWidth);
               ctx.setLineDash(CONFIG.redDashPattern); strokePtsPreview(ctx, sampled); ctx.setLineDash([]);
             }
-          } else if (isRailway) {
-            ctx.strokeStyle = rwLevel.color; ctx.lineWidth = W; strokePtsPreview(ctx, sampled);
-          } else if (isMetro) {
-            ctx.strokeStyle = '#fff'; ctx.lineWidth = W + 2; strokePtsPreview(ctx, sampled);
-            ctx.strokeStyle = metroCfg.color; ctx.lineWidth = W; strokePtsPreview(ctx, sampled);
           } else {
             ctx.strokeStyle = '#4a4a4a'; ctx.lineWidth = Math.max(0.6, 1.0 / zoom);
             ctx.setLineDash([4, 3]); strokePtsPreview(ctx, sampled); ctx.setLineDash([]);
@@ -326,10 +324,10 @@ const Tools = (function () {
       Renderer.setCalibrateLine({ x1: calibrateStart.x, y1: calibrateStart.y, x2: w.x, y2: w.y });
       Renderer.scheduleRender(); return;
     }
-    if ((current === 'road-bezier' || current === 'road-polyline' || current === 'road-ramp' || current === 'boundary' || current === 'railway' || current === 'metro' || current === 'district-polygon') && drawing) {
-      if (shiftPressed && drawing.points.length > 0) {
+    if ((current === 'road-bezier' || current === 'road-polyline' || current === 'road-ramp' || current === 'boundary' || current === 'district-polygon') && drawing) {
+      if (shiftPressed && drawing.points.length > 0)
         drawing.previewPoint = constrainToAxis(drawing.points[drawing.points.length - 1], w);
-      } else { drawing.previewPoint = w; }
+      else drawing.previewPoint = w;
       updatePreview();
     }
   }
@@ -378,19 +376,6 @@ const Tools = (function () {
         if (Math.hypot(target.x - last.x, target.y - last.y) > 1) drawing.points.push({ x: target.x, y: target.y });
       }
       updatePreview();
-    } else if (current === 'railway' || current === 'metro') {
-      const type = current; const curve = 'bezier';
-      if (!drawing) {
-        const init = { type, curve, points: [{ x: w.x, y: w.y }], previewPoint: w };
-        if (type === 'railway') { init.level = options.railwayLevel; init.name = options.railwayName; }
-        else { init.lineId = options.metroLineId; init.name = options.metroName; init.transfers = []; }
-        drawing = init;
-      } else {
-        const last = drawing.points[drawing.points.length - 1];
-        const target = shiftPressed ? constrainToAxis(last, w) : w;
-        if (Math.hypot(target.x - last.x, target.y - last.y) > 1) drawing.points.push({ x: target.x, y: target.y });
-      }
-      updatePreview();
     } else if (current === 'district-polygon') {
       if (!drawing) {
         drawing = { type: 'district', category: options.landUseCode, name: options.districtName, points: [{ x: w.x, y: w.y }], previewPoint: w };
@@ -403,8 +388,9 @@ const Tools = (function () {
         if (Math.hypot(w.x - last.x, w.y - last.y) > 1) drawing.points.push({ x: w.x, y: w.y });
       }
       updatePreview();
-    } else if (current === 'block-fill') { fillBlockAt(w.x, w.y); }
-    else if (current === 'annotation') {
+    } else if (current === 'block-fill') {
+      fillBlockAt(w.x, w.y);
+    } else if (current === 'annotation') {
       if (options.annotationText) {
         State.addEntity({ type: 'annotation', x: w.x, y: w.y, text: options.annotationText, fontSize: options.annotationSize, color: '#1a1a1a', align: 'left' });
       } else {
@@ -419,8 +405,6 @@ const Tools = (function () {
     if (!drawing) return;
     if (drawing.type === 'road' && drawing.points.length >= 2) finishRoad();
     else if (drawing.type === 'boundary' && drawing.points.length >= 2) finishBoundary();
-    else if (drawing.type === 'railway' && drawing.points.length >= 2) finishRailway();
-    else if (drawing.type === 'metro' && drawing.points.length >= 2) finishMetro();
     else if (drawing.type === 'district' && drawing.points.length >= 3) finishPolygonDistrict();
     else { cancelDrawing(); Renderer.render(); }
   }
@@ -448,18 +432,6 @@ const Tools = (function () {
     const boundaryEntity = State.project.entities[State.project.entities.length - 1];
     refreshAdjacentBlocks(boundaryEntity);
     if (splitCount > 0) showToast(`已拆分 ${splitCount} 个街区`);
-    drawing = null; Renderer.setPreview(null); Renderer.render();
-  }
-
-  function finishRailway() {
-    if (!drawing || drawing.points.length < 2) { drawing = null; Renderer.setPreview(null); Renderer.render(); return; }
-    State.addEntity({ type: 'railway', level: drawing.level, curve: drawing.curve, name: drawing.name, points: drawing.points.map(p => ({ x: p.x, y: p.y })) });
-    drawing = null; Renderer.setPreview(null); Renderer.render();
-  }
-
-  function finishMetro() {
-    if (!drawing || drawing.points.length < 2) { drawing = null; Renderer.setPreview(null); Renderer.render(); return; }
-    State.addEntity({ type: 'metro', lineId: drawing.lineId, curve: drawing.curve, name: drawing.name, transfers: drawing.transfers || [], points: drawing.points.map(p => ({ x: p.x, y: p.y })) });
     drawing = null; Renderer.setPreview(null); Renderer.render();
   }
 
@@ -563,34 +535,21 @@ const Tools = (function () {
   function updatePreview() {
     if (!drawing) { Renderer.setPreview(null); Renderer.scheduleRender(); return; }
     Renderer.setPreview((ctx, zoom) => {
-      if (drawing.type === 'road' || drawing.type === 'boundary' || drawing.type === 'railway' || drawing.type === 'metro') {
+      if (drawing.type === 'road' || drawing.type === 'boundary') {
         const pts = drawing.curve === 'bezier' ? State.sampleSpline(drawing.points, CONFIG.splineSegments) : drawing.points;
         const isBoundary = drawing.type === 'boundary';
-        const isRailway = drawing.type === 'railway';
-        const isMetro = drawing.type === 'metro';
         const level = CONFIG.roadLevels[drawing.level] || CONFIG.roadLevels.local;
-        const rwLevel = CONFIG.railwayLevels[drawing.level] || CONFIG.railwayLevels.trunk;
-        const metroCfg = CONFIG.metroLines.find(l => l.id === drawing.lineId) || { color: '#666' };
-        const W = isRailway ? rwLevel.width : (isMetro ? CONFIG.metroWidth : level.width / State.project.meterPerPixel);
+        const W = level.width / State.project.meterPerPixel;
         if (isBoundary) {
           ctx.strokeStyle = '#4a4a4a'; ctx.globalAlpha = 0.8;
           ctx.lineWidth = Math.max(0.6, 1.0 / zoom); ctx.setLineDash([4, 3]);
           ctx.lineCap = 'round'; ctx.lineJoin = 'round';
           strokePreview(ctx, pts, drawing.previewPoint); ctx.setLineDash([]);
-        } else if (isRailway) {
-          ctx.strokeStyle = rwLevel.color; ctx.globalAlpha = 0.6;
-          ctx.lineWidth = W; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-          strokePreview(ctx, pts, drawing.previewPoint);
-        } else if (isMetro) {
-          ctx.globalAlpha = 0.6;
-          ctx.strokeStyle = '#fff'; ctx.lineWidth = W + 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-          strokePreview(ctx, pts, drawing.previewPoint);
-          ctx.strokeStyle = metroCfg.color; ctx.lineWidth = W;
-          strokePreview(ctx, pts, drawing.previewPoint);
         } else {
           if (level.edgeColor) {
             ctx.strokeStyle = level.edgeColor; ctx.globalAlpha = 0.5;
-            ctx.lineWidth = W + (level.edgeWidth || 0) * 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+            ctx.lineWidth = W + (level.edgeWidth || 0) * 2;
+            ctx.lineCap = 'round'; ctx.lineJoin = 'round';
             strokePreview(ctx, pts, drawing.previewPoint);
           }
           if (level.centerType === 'red-dashed') {
@@ -601,7 +560,7 @@ const Tools = (function () {
         }
         ctx.globalAlpha = 1;
         for (const p of drawing.points) {
-          ctx.fillStyle = isBoundary ? '#4a4a4a' : (isRailway ? '#1a1a1a' : (isMetro ? metroCfg.color : '#ff6b35'));
+          ctx.fillStyle = isBoundary ? '#4a4a4a' : '#ff6b35';
           ctx.beginPath(); ctx.arc(p.x, p.y, 3.5 / zoom, 0, Math.PI * 2); ctx.fill();
         }
       } else if (drawing.type === 'district') {
@@ -667,11 +626,6 @@ const Tools = (function () {
         const width = level.width / State.project.meterPerPixel;
         const tol = Math.max(width / 2, CONFIG.roadHitTolerance / zoom);
         if (State.distToPolyline(w.x, w.y, pts) < tol) return e;
-      } else if ((e.type === 'railway' || e.type === 'metro') && e.points && e.points.length >= 2) {
-        const pts = getLineSamples(e);
-        const width = e.type === 'railway' ? (CONFIG.railwayLevels[e.level] || CONFIG.railwayLevels.trunk).width : CONFIG.metroWidth;
-        const tol = Math.max(width / 2, CONFIG.roadHitTolerance / zoom);
-        if (State.distToPolyline(w.x, w.y, pts) < tol) return e;
       } else if (e.type === 'boundary' && e.points && e.points.length >= 2) {
         const pts = getLineSamples(e);
         if (State.distToPolyline(w.x, w.y, pts) < CONFIG.roadHitTolerance / zoom) return e;
@@ -697,10 +651,11 @@ const Tools = (function () {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); State.redo(); Renderer.render(); return; }
     if (e.key === 'Delete' || e.key === 'Backspace') {
       const sel = State.getSelected();
-      if (sel) { e.preventDefault(); State.removeEntity(sel.id); exitEditMode(); Renderer.render(); } return;
+      if (sel) { e.preventDefault(); State.removeEntity(sel.id); exitEditMode(); Renderer.render(); }
+      return;
     }
     if (e.key === 'Escape') { cancelDrawing(); exitEditMode(); State.setSelected(null); Renderer.render(); return; }
-    const keyMap = { v: 'select', h: 'pan', b: 'road-bezier', l: 'road-polyline', m: 'road-ramp', n: 'railway', u: 'metro', f: 'block-fill', k: 'boundary', e: 'eraser', p: 'district-polygon', r: 'district-rect', t: 'annotation', c: 'calibrate' };
+    const keyMap = { v: 'select', h: 'pan', b: 'road-bezier', l: 'road-polyline', m: 'road-ramp', f: 'block-fill', k: 'boundary', e: 'eraser', p: 'district-polygon', r: 'district-rect', t: 'annotation', c: 'calibrate' };
     if (keyMap[e.key]) setTool(keyMap[e.key]);
   }
 
@@ -734,7 +689,7 @@ const Tools = (function () {
     const hitR = CONFIG.vertexHitRadius / zoom;
     let erased = false;
     const lineEntities = State.project.entities.filter(e =>
-      (e.type === 'road' || e.type === 'boundary' || e.type === 'railway' || e.type === 'metro') && e.points && e.points.length >= 2);
+      (e.type === 'road' || e.type === 'boundary') && e.points && e.points.length >= 2);
     for (const ent of lineEntities) {
       for (let i = 0; i < ent.points.length; i++) {
         const p = ent.points[i];
@@ -753,19 +708,10 @@ const Tools = (function () {
     if (idx === 0 || idx === pts.length - 1) {
       pts.splice(idx, 1); removeBlocksAdjacentTo(ent);
     } else {
-      const leftPts = pts.slice(0, idx);
-      const rightPts = pts.slice(idx + 1);
+      const leftPts = pts.slice(0, idx), rightPts = pts.slice(idx + 1);
       State.removeEntity(ent.id); removeBlocksAdjacentTo(ent);
-      if (leftPts.length >= 2) {
-        const ne = { type: ent.type, level: ent.level, name: ent.name, curve: ent.curve, points: leftPts };
-        if (ent.type === 'metro') { ne.lineId = ent.lineId; ne.transfers = (ent.transfers || []).slice(0, idx); }
-        State.addEntity(ne);
-      }
-      if (rightPts.length >= 2) {
-        const ne = { type: ent.type, level: ent.level, name: ent.name, curve: ent.curve, points: rightPts };
-        if (ent.type === 'metro') { ne.lineId = ent.lineId; ne.transfers = (ent.transfers || []).slice(idx + 1); }
-        State.addEntity(ne);
-      }
+      if (leftPts.length >= 2) State.addEntity({ type: ent.type, level: ent.level, name: ent.name, curve: ent.curve, points: leftPts });
+      if (rightPts.length >= 2) State.addEntity({ type: ent.type, level: ent.level, name: ent.name, curve: ent.curve, points: rightPts });
     }
   }
 

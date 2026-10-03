@@ -1,12 +1,11 @@
 /**
- * main.js — 应用入口与 UI 接线 v1.3.0
+ * main.js — 应用入口与 UI 接线
  */
 'use strict';
 
 (function () {
   const $ = sel => document.querySelector(sel);
   const $$ = sel => Array.from(document.querySelectorAll(sel));
-
   const canvas = $('#canvas');
   const projectNameInput = $('#projectName');
   const toolButtons = $$('.tool-btn[data-tool]');
@@ -30,20 +29,13 @@
   Tools.init(canvas);
 
   State.onChange(() => { updateLayers(); updateProperties(); updateUndoRedo(); updateStatus(); });
-
-  Tools.onToolChange(tool => {
-    toolButtons.forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
-    updateOptions(tool); updateStatus();
-  });
-
+  Tools.onToolChange(tool => { toolButtons.forEach(b => b.classList.toggle('active', b.dataset.tool === tool)); updateOptions(tool); updateStatus(); });
   Tools.onCoords(w => { statusCoords.textContent = `X: ${w.x.toFixed(0)}  Y: ${w.y.toFixed(0)}`; });
   Tools.onZoom(z => { statusZoom.textContent = `缩放: ${(z * 100).toFixed(0)}%`; });
 
   toolButtons.forEach(btn => { btn.addEventListener('click', () => Tools.setTool(btn.dataset.tool)); });
-
   undoBtn.addEventListener('click', () => { State.undo(); Renderer.render(); });
   redoBtn.addEventListener('click', () => { State.redo(); Renderer.render(); });
-
   zoomInBtn.addEventListener('click', () => zoomBy(1.25));
   zoomOutBtn.addEventListener('click', () => zoomBy(0.8));
   zoomResetBtn.addEventListener('click', () => { State.setView({ zoom: 1, panX: 60, panY: 40 }); Renderer.render(); });
@@ -66,7 +58,6 @@
       if (ok) { State.newProject(); projectNameInput.value = State.project.name; Renderer.render(); }
     });
   });
-
   $('#saveBtn').addEventListener('click', () => Export.saveProject());
   $('#loadBtn').addEventListener('click', () => projectInput.click());
   projectInput.addEventListener('change', e => {
@@ -77,14 +68,12 @@
   $('#exportBtn').addEventListener('click', () => Export.exportPNG());
   $('#basemapBtn').addEventListener('click', () => basemapInput.click());
   basemapInput.addEventListener('change', e => { const file = e.target.files[0]; if (file) Export.loadBasemap(file); e.target.value = ''; });
-
   $('#basemapOpacity').addEventListener('input', e => {
     const val = parseFloat(e.target.value);
     State.setBasemap({ opacity: val }, true);
     const ov = $('#opacityVal'); if (ov) ov.textContent = Math.round(val * 100) + '%';
     Renderer.render();
   });
-
   $('#deleteBtn').addEventListener('click', () => Tools.deleteSelected());
 
   function updateOptions(tool) {
@@ -94,7 +83,6 @@
       const cfg = CONFIG.landUse[major];
       for (const code in cfg.sub) landUseCats.push({ code, name: cfg.sub[code], color: cfg.color });
     }
-
     if (tool === 'road-bezier' || tool === 'road-polyline') {
       html = `
         <div class="opt-group"><label>道路等级</label>
@@ -109,24 +97,6 @@
         <div class="opt-group"><label>路名（可选）</label>
           <input type="text" id="optRoadName" value="${Tools.getOption('roadName') || ''}" placeholder="如：A匝道"></div>
         <div class="opt-hint">单击添加锚点绘制平滑匝道，按回车完成。端点尽量靠近已有道路。</div>`;
-    } else if (tool === 'railway') {
-      html = `
-        <div class="opt-group"><label>铁路等级</label>
-          <select id="optRailwayLevel">
-            ${CONFIG.railwayLevelOrder.map(k => `<option value="${k}"${Tools.getOption('railwayLevel') === k ? ' selected' : ''}>${CONFIG.railwayLevels[k].name}（${CONFIG.railwayLevels[k].width}m）</option>`).join('')}
-          </select></div>
-        <div class="opt-group"><label>线路名称（可选）</label>
-          <input type="text" id="optRailwayName" value="${Tools.getOption('railwayName') || ''}" placeholder="如：京沪高铁"></div>
-        <div class="opt-hint">单击添加锚点绘制平滑铁路，黑色粗线+白色枕木，按回车完成。右键可编辑节点。</div>`;
-    } else if (tool === 'metro') {
-      html = `
-        <div class="opt-group"><label>线路</label>
-          <select id="optMetroLine">
-            ${CONFIG.metroLines.map(l => `<option value="${l.id}"${Tools.getOption('metroLineId') === l.id ? ' selected' : ''}>${l.name}</option>`).join('')}
-          </select></div>
-        <div class="opt-group"><label>线路名称（可选）</label>
-          <input type="text" id="optMetroName" value="${Tools.getOption('metroName') || ''}" placeholder="如：1号线"></div>
-        <div class="opt-hint">单击添加锚点，每个锚点自动生成站点。彩色线+白边站点圆圈，按回车完成。右键可编辑节点。</div>`;
     } else if (tool === 'boundary') {
       html = `
         <div class="opt-hint" style="color:#1d4ed8;font-weight:600;">绘制街区边界线（细灰虚线），可围合新街区或拆分已有街区。</div>
@@ -172,13 +142,8 @@
       html = `<div class="opt-hint">拖拽平移画布。也可在任意工具下按住空格拖拽。</div>`;
     }
     optionsContent.innerHTML = html;
-
     const rl = $('#optRoadLevel'); if (rl) rl.addEventListener('change', e => Tools.setOption('roadLevel', e.target.value));
     const rn = $('#optRoadName'); if (rn) rn.addEventListener('input', e => Tools.setOption('roadName', e.target.value));
-    const rwl = $('#optRailwayLevel'); if (rwl) rwl.addEventListener('change', e => Tools.setOption('railwayLevel', e.target.value));
-    const rwn = $('#optRailwayName'); if (rwn) rwn.addEventListener('input', e => Tools.setOption('railwayName', e.target.value));
-    const ml = $('#optMetroLine'); if (ml) ml.addEventListener('change', e => Tools.setOption('metroLineId', e.target.value));
-    const mn = $('#optMetroName'); if (mn) mn.addEventListener('input', e => Tools.setOption('metroName', e.target.value));
     const lu = $('#optLandUse'); if (lu) lu.addEventListener('change', e => Tools.setOption('landUseCode', e.target.value));
     const dn = $('#optDistrictName'); if (dn) dn.addEventListener('input', e => Tools.setOption('districtName', e.target.value));
     const at = $('#optAnnText'); if (at) at.addEventListener('input', e => Tools.setOption('annotationText', e.target.value));
@@ -193,24 +158,16 @@
   function updateLayers() {
     layerList.innerHTML = CONFIG.layers.map(l => {
       const visible = State.isLayerVisible(l.id);
-      return `<div class="layer-item" data-layer="${l.id}">
-        <span class="layer-eye ${visible ? '' : 'off'}">${visible ? '◉' : '○'}</span>
-        <span class="layer-name">${l.name}</span></div>`;
+      return `<div class="layer-item" data-layer="${l.id}"><span class="layer-eye ${visible ? '' : 'off'}">${visible ? '◉' : '○'}</span><span class="layer-name">${l.name}</span></div>`;
     }).join('');
     $$('.layer-item').forEach(item => {
-      item.addEventListener('click', () => {
-        const id = item.dataset.layer;
-        State.setLayerVisible(id, !State.isLayerVisible(id));
-      });
+      item.addEventListener('click', () => { const id = item.dataset.layer; State.setLayerVisible(id, !State.isLayerVisible(id)); });
     });
   }
 
   function updateProperties() {
     const sel = State.getSelected();
-    if (!sel) {
-      propertiesPanel.innerHTML = '<div class="prop-empty">未选中对象<br><span style="font-size:12px;color:#999;">使用选择工具点击实体</span></div>';
-      return;
-    }
+    if (!sel) { propertiesPanel.innerHTML = '<div class="prop-empty">未选中对象<br><span style="font-size:12px;color:#999;">使用选择工具点击实体</span></div>'; return; }
     let html = `<div class="prop-title">${entityTypeLabel(sel.type)}</div>`;
     if (sel.type === 'road') {
       html += `
@@ -219,21 +176,6 @@
         <div class="prop-row"><label>路名</label><input type="text" data-prop="name" value="${sel.name || ''}"></div>
         <div class="prop-row"><label>线型</label><span>${sel.curve === 'bezier' ? '贝塞尔曲线' : '折线'}</span></div>
         <div class="prop-row"><label>锚点数</label><span>${sel.points ? sel.points.length : 0}</span></div>`;
-    } else if (sel.type === 'railway') {
-      html += `
-        <div class="prop-row"><label>铁路等级</label>
-          <select data-prop="level">${CONFIG.railwayLevelOrder.map(k => `<option value="${k}"${sel.level === k ? ' selected' : ''}>${CONFIG.railwayLevels[k].name}</option>`).join('')}</select></div>
-        <div class="prop-row"><label>线路名</label><input type="text" data-prop="name" value="${sel.name || ''}"></div>
-        <div class="prop-row"><label>锚点数</label><span>${sel.points ? sel.points.length : 0}</span></div>
-        <div class="opt-hint" style="margin-top:8px;">右键铁路可编辑节点。</div>`;
-    } else if (sel.type === 'metro') {
-      html += `
-        <div class="prop-row"><label>线路</label>
-          <select data-prop="lineId">${CONFIG.metroLines.map(l => `<option value="${l.id}"${sel.lineId === l.id ? ' selected' : ''}>${l.name}</option>`).join('')}</select></div>
-        <div class="prop-row"><label>线路名</label><input type="text" data-prop="name" value="${sel.name || ''}"></div>
-        <div class="prop-row"><label>站数</label><span>${sel.points ? sel.points.length : 0}</span></div>
-        <div class="prop-row"><label>换乘站</label><span>${(sel.transfers || []).filter(Boolean).length}</span></div>
-        <div class="opt-hint" style="margin-top:8px;">右键地铁可编辑节点。每个锚点为一个站点。</div>`;
     } else if (sel.type === 'block') {
       const cat = getLandUseByCode(sel.category);
       const bbox = State.getBBox(sel);
@@ -245,10 +187,7 @@
         <div class="opt-hint" style="margin-top:8px;">街区由道路/边界自动围合，不可直接编辑。调整周边道路或边界节点可改变街区范围，变动过大时街区将自动清除。</div>`;
     } else if (sel.type === 'district') {
       const cats = [];
-      for (const major of CONFIG.landUseOrder) {
-        const cfg = CONFIG.landUse[major];
-        for (const code in cfg.sub) cats.push({ code, name: cfg.sub[code] });
-      }
+      for (const major of CONFIG.landUseOrder) { const cfg = CONFIG.landUse[major]; for (const code in cfg.sub) cats.push({ code, name: cfg.sub[code] }); }
       const bbox = State.getBBox(sel);
       const area = bbox ? (bbox.w * bbox.h * Math.pow(State.project.meterPerPixel, 2) / 10000).toFixed(1) : '?';
       html += `
@@ -281,7 +220,7 @@
   }
 
   function entityTypeLabel(type) {
-    return { road: '道路', railway: '铁路', metro: '地铁/轨道交通', district: '片区/用地', block: '街区/用地', annotation: '标注', water: '水系' }[type] || type;
+    return { road: '道路', district: '片区/用地', block: '街区/用地', annotation: '标注', water: '水系' }[type] || type;
   }
 
   function updateStatus() {
@@ -296,9 +235,7 @@
     redoBtn.classList.toggle('disabled', !State.canRedo());
   }
 
-  function updateAll() {
-    updateLayers(); updateProperties(); updateUndoRedo(); updateStatus(); updateOptions(Tools.getTool());
-  }
+  function updateAll() { updateLayers(); updateProperties(); updateUndoRedo(); updateStatus(); updateOptions(Tools.getTool()); }
 
   window.addEventListener('resize', () => { Renderer.resize(); Renderer.render(); });
 
@@ -307,6 +244,6 @@
   updateAll();
   Renderer.render();
   UI.Tooltip.scan(document);
-  console.log('%c架空城市规划设计器 v1.3.0 已启动', 'font-size:16px;font-weight:bold;color:#333;');
-  console.log('快捷键: V选择 H平移 B贝塞尔路 L折线路 M匝道 N铁路 U地铁 F填街区 K划边界 E橡皮擦 P多边形 R矩形 T标注 C校准 空格+拖拽平移 Ctrl+Z撤销 Delete删除');
+  console.log('%c架空城市规划设计器 v1.3.1 已启动', 'font-size:16px;font-weight:bold;color:#333;');
+  console.log('快捷键: V选择 H平移 B贝塞尔路 L折线路 M匝道 F填街区 K划边界 E橡皮擦 P多边形 R矩形 T标注 C校准 空格+拖拽平移 Ctrl+Z撤销 Delete删除');
 })();

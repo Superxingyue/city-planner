@@ -1,7 +1,6 @@
 /**
- * renderer.js — 画布渲染引擎 v1.3.0
- * 多层套色道路、平涂用地、地块编号、铁路、地铁、选中态、绘制预览
- * 10fps 渲染上限，低质量拖拽模式
+ * renderer.js — 画布渲染引擎
+ * 多层套色道路、平涂用地、地块编号、选中态、绘制预览
  */
 'use strict';
 
@@ -28,8 +27,7 @@ const Renderer = (function () {
       if (wait > 0) {
         setTimeout(() => { lastRenderTime = performance.now(); render(); }, wait);
       } else {
-        lastRenderTime = now;
-        render();
+        lastRenderTime = now; render();
       }
     });
   }
@@ -77,13 +75,11 @@ const Renderer = (function () {
     const { zoom, panX, panY } = p.view;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const cw = canvas.clientWidth, ch = canvas.clientHeight;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, cw, ch);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, cw, ch);
     const vx = -panX / zoom, vy = -panY / zoom;
     const vw = cw / zoom, vh = ch / zoom;
-    ctx.save();
-    ctx.translate(panX, panY);
-    ctx.scale(zoom, zoom);
+    ctx.save(); ctx.translate(panX, panY); ctx.scale(zoom, zoom);
+
     if (State.isLayerVisible('basemap')) drawBasemap(ctx);
     if (State.isLayerVisible('water')) {
       for (const e of p.entities) {
@@ -125,20 +121,6 @@ const Renderer = (function () {
         drawBoundary(ctx, e, zoom);
       }
     }
-    if (State.isLayerVisible('roads')) {
-      for (const e of p.entities) {
-        if (e.type !== 'railway') continue;
-        if (!bboxVisible(entityBBox(e), vx, vy, vw, vh, 100)) continue;
-        drawRailway(ctx, e, zoom);
-      }
-    }
-    if (State.isLayerVisible('roads')) {
-      for (const e of p.entities) {
-        if (e.type !== 'metro') continue;
-        if (!bboxVisible(entityBBox(e), vx, vy, vw, vh, 100)) continue;
-        drawMetro(ctx, e, zoom);
-      }
-    }
     if (State.isLayerVisible('annotations')) {
       for (const e of p.entities) {
         if (e.type !== 'annotation') continue;
@@ -158,11 +140,9 @@ const Renderer = (function () {
     const img = State.getBasemapImage();
     const bm = State.project.basemap;
     if (!img || !bm.dataUrl) return;
-    ctx.save();
-    ctx.globalAlpha = bm.opacity;
+    ctx.save(); ctx.globalAlpha = bm.opacity;
     if (bm.rotation) {
-      ctx.translate(bm.x, bm.y);
-      ctx.rotate(bm.rotation * Math.PI / 180);
+      ctx.translate(bm.x, bm.y); ctx.rotate(bm.rotation * Math.PI / 180);
       ctx.drawImage(img, 0, 0, img.width * bm.scale, img.height * bm.scale);
     } else {
       ctx.drawImage(img, bm.x, bm.y, img.width * bm.scale, img.height * bm.scale);
@@ -175,16 +155,14 @@ const Renderer = (function () {
     const dpr = window.devicePixelRatio || 1;
     if (!offscreenCanvas || offscreenCanvas.width !== canvas.width || offscreenCanvas.height !== canvas.height) {
       offscreenCanvas = document.createElement('canvas');
-      offscreenCanvas.width = canvas.width;
-      offscreenCanvas.height = canvas.height;
+      offscreenCanvas.width = canvas.width; offscreenCanvas.height = canvas.height;
     }
     const off = offscreenCanvas;
     const octx = off.getContext('2d');
     octx.setTransform(1, 0, 0, 1, 0, 0);
     octx.clearRect(0, 0, off.width, off.height);
     octx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    octx.translate(panX, panY);
-    octx.scale(zoom, zoom);
+    octx.translate(panX, panY); octx.scale(zoom, zoom);
     octx.lineCap = 'round'; octx.lineJoin = 'round';
     for (const road of roads) {
       if (!road.points || road.points.length < 2) continue;
@@ -192,8 +170,7 @@ const Renderer = (function () {
       if (!level.edgeColor) continue;
       const W = level.width / State.project.meterPerPixel;
       const pts = State.getRoadSamples(road);
-      octx.strokeStyle = level.edgeColor;
-      octx.lineWidth = W + level.edgeWidth * 2;
+      octx.strokeStyle = level.edgeColor; octx.lineWidth = W + level.edgeWidth * 2;
       octx.beginPath(); octx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) octx.lineTo(pts[i].x, pts[i].y);
       octx.stroke();
@@ -215,18 +192,14 @@ const Renderer = (function () {
       const level = CONFIG.roadLevels[road.level] || CONFIG.roadLevels.local;
       if (level.centerType !== 'red-dashed' || !level.centerWidth) continue;
       const pts = State.getRoadSamples(road);
-      octx.strokeStyle = level.centerColor;
-      octx.lineWidth = Math.max(0.3, level.centerWidth);
+      octx.strokeStyle = level.centerColor; octx.lineWidth = Math.max(0.3, level.centerWidth);
       octx.setLineDash(CONFIG.redDashPattern);
       octx.beginPath(); octx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) octx.lineTo(pts[i].x, pts[i].y);
-      octx.stroke();
-      octx.setLineDash([]);
+      octx.stroke(); octx.setLineDash([]);
     }
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.drawImage(off, 0, 0);
-    ctx.restore();
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(off, 0, 0); ctx.restore();
   }
 
   function drawRoadLayer(ctx, road, layer) {
@@ -240,12 +213,16 @@ const Renderer = (function () {
       if (!level.edgeColor || level.edgeWidth <= 0) return;
       ctx.strokeStyle = level.edgeColor; ctx.lineWidth = W + level.edgeWidth * 2;
       strokePts(ctx, pts);
+    } else if (layer === 'innerDash') {
+      if (!level.innerDash) return;
+      ctx.strokeStyle = level.innerDash; ctx.lineWidth = W - 1;
+      ctx.setLineDash([8, 6]); strokePts(ctx, pts); ctx.setLineDash([]);
+    } else if (layer === 'body') {
+      ctx.strokeStyle = level.bodyColor; ctx.lineWidth = Math.max(1, W); strokePts(ctx, pts);
     } else if (layer === 'center') {
       if (level.centerType === 'red-dashed' && level.centerWidth > 0) {
-        ctx.strokeStyle = level.centerColor;
-        ctx.lineWidth = Math.max(0.5, level.centerWidth);
-        ctx.setLineDash(CONFIG.redDashPattern);
-        strokePts(ctx, pts); ctx.setLineDash([]);
+        ctx.strokeStyle = level.centerColor; ctx.lineWidth = Math.max(0.5, level.centerWidth);
+        ctx.setLineDash(CONFIG.redDashPattern); strokePts(ctx, pts); ctx.setLineDash([]);
       }
     }
   }
@@ -280,15 +257,12 @@ const Renderer = (function () {
   function drawLandUse(ctx, e) {
     if (!e.points || e.points.length < 3) return;
     const cat = getLandUseByCode(e.category) || { color: '#cccccc' };
-    ctx.beginPath();
-    ctx.moveTo(e.points[0].x, e.points[0].y);
+    ctx.beginPath(); ctx.moveTo(e.points[0].x, e.points[0].y);
     for (let i = 1; i < e.points.length; i++) ctx.lineTo(e.points[i].x, e.points[i].y);
     ctx.closePath();
     ctx.fillStyle = cat.color; ctx.fill();
-    ctx.strokeStyle = darken(cat.color, 0.3);
-    ctx.lineWidth = 0.15;
-    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-    ctx.stroke();
+    ctx.strokeStyle = darken(cat.color, 0.3); ctx.lineWidth = 0.15;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke();
   }
 
   function drawPlotNumber(ctx, block, zoom) {
@@ -300,18 +274,14 @@ const Renderer = (function () {
     ctx.font = `${size}px ${CONFIG.kaiti}`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.beginPath(); ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
-    ctx.strokeStyle = '#1a1a1a';
-    ctx.lineWidth = Math.max(0.25, 0.35 / zoom);
-    ctx.stroke();
-    ctx.fillStyle = '#1a1a1a';
-    ctx.fillText(label, center.x, center.y + 0.5);
+    ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = Math.max(0.25, 0.35 / zoom); ctx.stroke();
+    ctx.fillStyle = '#1a1a1a'; ctx.fillText(label, center.x, center.y + 0.5);
   }
 
   function drawBoundary(ctx, b, zoom) {
     if (!b.points || b.points.length < 2) return;
     const pts = b.curve === 'bezier' ? State.sampleSpline(b.points, CONFIG.splineSegments) : b.points;
-    ctx.strokeStyle = '#4a4a4a';
-    ctx.lineWidth = Math.max(0.6, 1.0 / zoom);
+    ctx.strokeStyle = '#4a4a4a'; ctx.lineWidth = Math.max(0.6, 1.0 / zoom);
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.setLineDash([4, 3]);
     ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
@@ -319,96 +289,9 @@ const Renderer = (function () {
     ctx.stroke(); ctx.setLineDash([]);
   }
 
-  function drawRailway(ctx, rw, zoom) {
-    if (!rw.points || rw.points.length < 2) return;
-    const level = CONFIG.railwayLevels[rw.level] || CONFIG.railwayLevels.trunk;
-    const pts = rw.curve === 'bezier' ? State.sampleSpline(rw.points, CONFIG.splineSegments) : rw.points;
-    const W = level.width;
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.strokeStyle = level.color;
-    ctx.lineWidth = W;
-    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    ctx.stroke();
-    if (!lowQuality) {
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = Math.max(0.8, W * 0.18);
-    const spacing = level.tieSpacing;
-    let acc = 0;
-    for (let i = 1; i < pts.length; i++) {
-      const a = pts[i - 1], b = pts[i];
-      const dx = b.x - a.x, dy = b.y - a.y;
-      const segLen = Math.hypot(dx, dy);
-      if (segLen < 0.5) continue;
-      const nx = -dy / segLen, ny = dx / segLen;
-      let d = spacing - (acc % spacing);
-      if (acc === 0) d = 0;
-      while (d <= segLen) {
-        const t = d / segLen;
-        const cx = a.x + dx * t, cy = a.y + dy * t;
-        const half = W * 0.55;
-        ctx.beginPath();
-        ctx.moveTo(cx - nx * half, cy - ny * half);
-        ctx.lineTo(cx + nx * half, cy + ny * half);
-        ctx.stroke();
-        d += spacing;
-      }
-      acc += segLen;
-    }
-    }
-    if (rw.name) {
-      const mid = pts[Math.floor(pts.length / 2)];
-      ctx.fillStyle = '#1a1a1a';
-      ctx.font = `${Math.max(9, W * 0.35)}px ${CONFIG.fangSong}`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(rw.name, mid.x, mid.y - W / 2 - 5);
-    }
-  }
-
-  function drawMetro(ctx, mt, zoom) {
-    if (!mt.points || mt.points.length < 2) return;
-    const lineCfg = CONFIG.metroLines.find(l => l.id === mt.lineId) || { color: '#666', name: mt.lineId || '地铁' };
-    const color = lineCfg.color;
-    const W = CONFIG.metroWidth;
-    const pts = mt.curve === 'bezier' ? State.sampleSpline(mt.points, CONFIG.splineSegments) : mt.points;
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = W + 2;
-    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    ctx.stroke();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = W;
-    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    ctx.stroke();
-    const r = CONFIG.metroStationRadius;
-    for (let i = 0; i < mt.points.length; i++) {
-      const p = mt.points[i];
-      const isTransfer = mt.transfers && mt.transfers[i];
-      if (isTransfer) {
-        ctx.fillStyle = color;
-        ctx.beginPath(); ctx.arc(p.x, p.y, r + 1, 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.2; ctx.stroke();
-      } else {
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
-      }
-    }
-    if (mt.name) {
-      const mid = pts[Math.floor(pts.length / 2)];
-      ctx.fillStyle = color;
-      ctx.font = `bold ${Math.max(9, W * 0.4)}px ${CONFIG.fangSong}`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(mt.name, mid.x, mid.y - W / 2 - 6);
-    }
-  }
-
   function drawWater(ctx, w) {
     if (!w.points || w.points.length < 3) return;
-    ctx.beginPath();
-    ctx.moveTo(w.points[0].x, w.points[0].y);
+    ctx.beginPath(); ctx.moveTo(w.points[0].x, w.points[0].y);
     for (let i = 1; i < w.points.length; i++) ctx.lineTo(w.points[i].x, w.points[i].y);
     ctx.closePath();
     ctx.fillStyle = '#b8d4e8'; ctx.fill();
@@ -426,8 +309,8 @@ const Renderer = (function () {
   function drawCalibrateLine(ctx, line, zoom) {
     ctx.strokeStyle = '#d62b2b'; ctx.lineWidth = 2 / zoom;
     ctx.setLineDash([6 / zoom, 4 / zoom]);
-    ctx.beginPath(); ctx.moveTo(line.x1, line.y1); ctx.lineTo(line.x2, line.y2); ctx.stroke();
-    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(line.x1, line.y1); ctx.lineTo(line.x2, line.y2);
+    ctx.stroke(); ctx.setLineDash([]);
     for (const [x, y] of [[line.x1, line.y1], [line.x2, line.y2]]) {
       ctx.fillStyle = '#d62b2b';
       ctx.beginPath(); ctx.arc(x, y, 4 / zoom, 0, Math.PI * 2); ctx.fill();
@@ -437,8 +320,8 @@ const Renderer = (function () {
   function drawGuideLine(ctx, gl, zoom) {
     ctx.strokeStyle = '#ff6b35'; ctx.lineWidth = 1.2 / Math.max(0.5, zoom);
     ctx.setLineDash([5 / zoom, 3 / zoom]);
-    ctx.beginPath(); ctx.moveTo(gl.x1, gl.y1); ctx.lineTo(gl.x2, gl.y2); ctx.stroke();
-    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(gl.x1, gl.y1); ctx.lineTo(gl.x2, gl.y2);
+    ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle = '#ff6b35';
     ctx.beginPath(); ctx.arc(gl.x2, gl.y2, 3.5 / Math.max(0.5, zoom), 0, Math.PI * 2); ctx.fill();
   }
@@ -459,7 +342,7 @@ const Renderer = (function () {
     ctx.fillStyle = '#ff6b35'; ctx.font = `bold 11px ${CONFIG.cadFont}`;
     ctx.textAlign = 'left';
     const first = toScreen(entity.points[0]);
-    ctx.fillText('编辑节点：左键添加 / 右键删除 / 拖拽移动 / Enter 退出', first.x + 12, first.y - 12);
+    ctx.fillText('编辑节点：点端点延伸 / 拖拽移动 / 右键菜单删节点 / Enter 退出', first.x + 12, first.y - 12);
   }
 
   function darken(hex, amount) {
@@ -502,10 +385,6 @@ const Renderer = (function () {
       for (const e of roads) drawRoadName(ctx, e);
     }
     for (const e of p.entities) if (e.type === 'boundary') drawBoundary(ctx, e, 1);
-    if (State.isLayerVisible('roads')) {
-      for (const e of p.entities) if (e.type === 'railway') drawRailway(ctx, e, 1);
-      for (const e of p.entities) if (e.type === 'metro') drawMetro(ctx, e, 1);
-    }
     if (State.isLayerVisible('annotations'))
       for (const e of p.entities) if (e.type === 'annotation') drawAnnotation(ctx, e, 1);
   }

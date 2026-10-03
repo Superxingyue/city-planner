@@ -3,14 +3,21 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>架空城市规划设计器 v1.3.0</title>
+<title>架空城市规划设计器 v1.3.1</title>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <div id="app">
+
+  <!-- ═══ 顶栏 ═══ -->
   <header id="topbar">
-    <div class="brand"><span class="brand-icon">◈</span><span class="brand-text">架空城市规划设计器</span></div>
-    <div class="project-name-wrap"><input type="text" id="projectName" value="未命名城市" spellcheck="false"></div>
+    <div class="brand">
+      <span class="brand-icon">◈</span>
+      <span class="brand-text">架空城市规划设计器</span>
+    </div>
+    <div class="project-name-wrap">
+      <input type="text" id="projectName" value="未命名城市" spellcheck="false">
+    </div>
     <div class="spacer"></div>
     <button class="tb-btn" id="newBtn" title="新建工程">新建</button>
     <button class="tb-btn" id="saveBtn" title="保存工程文件">保存</button>
@@ -18,50 +25,85 @@
     <button class="tb-btn" id="basemapBtn" title="上传底图">底图</button>
     <button class="tb-btn primary" id="exportBtn" title="导出国标成图 PNG">导出成图</button>
   </header>
+
+  <!-- ═══ 主区域 ═══ -->
   <div id="main">
+
+    <!-- 左侧工具栏 -->
     <nav id="toolbar">
       <div class="tool-section">
-        <button class="tool-btn active" data-tool="select" title="选择/编辑 (V)"><span class="tool-icon">◉</span><span class="tool-label">选择</span></button>
-        <button class="tool-btn" data-tool="pan" title="平移 (H)"><span class="tool-icon">✋</span><span class="tool-label">平移</span></button>
+        <button class="tool-btn active" data-tool="select" title="选择/编辑 (V)">
+          <span class="tool-icon">◉</span><span class="tool-label">选择</span>
+        </button>
+        <button class="tool-btn" data-tool="pan" title="平移 (H)">
+          <span class="tool-icon">✋</span><span class="tool-label">平移</span>
+        </button>
       </div>
       <div class="tool-divider"></div>
       <div class="tool-section">
-        <button class="tool-btn" data-tool="road-bezier" title="道路-贝塞尔曲线 (B)"><span class="tool-icon">∿</span><span class="tool-label">贝塞尔路</span></button>
-        <button class="tool-btn" data-tool="road-polyline" title="道路-折线 (L)"><span class="tool-icon">╱</span><span class="tool-label">折线路</span></button>
-        <button class="tool-btn" data-tool="road-ramp" title="匝道 (M)"><span class="tool-icon">⌒</span><span class="tool-label">匝道</span></button>
+        <button class="tool-btn" data-tool="road-bezier" title="道路-贝塞尔曲线 (B)">
+          <span class="tool-icon">∿</span><span class="tool-label">贝塞尔路</span>
+        </button>
+        <button class="tool-btn" data-tool="road-polyline" title="道路-折线 (L)">
+          <span class="tool-icon">╱</span><span class="tool-label">折线路</span>
+        </button>
+        <button class="tool-btn" data-tool="road-ramp" title="匝道 (M)">
+          <span class="tool-icon">⌒</span><span class="tool-label">匝道</span>
+        </button>
       </div>
       <div class="tool-divider"></div>
       <div class="tool-section">
-        <button class="tool-btn" data-tool="railway" title="铁路 (N)"><span class="tool-icon">═</span><span class="tool-label">铁路</span></button>
-        <button class="tool-btn" data-tool="metro" title="地铁/轨道交通 (U)"><span class="tool-icon">◉</span><span class="tool-label">地铁</span></button>
+        <button class="tool-btn" data-tool="block-fill" title="街区智能填充 (F)">
+          <span class="tool-icon">▣</span><span class="tool-label">填街区</span>
+        </button>
+        <button class="tool-btn" data-tool="boundary" title="划定街区边界 (K)">
+          <span class="tool-icon">✂</span><span class="tool-label">划边界</span>
+        </button>
+        <button class="tool-btn" data-tool="block-clear" title="街区清除器">
+          <span class="tool-icon">⌫</span><span class="tool-label">清街区</span>
+        </button>
+        <button class="tool-btn" data-tool="district-polygon" title="片区-多边形 (P)">
+          <span class="tool-icon">⬠</span><span class="tool-label">多边形</span>
+        </button>
+        <button class="tool-btn" data-tool="district-rect" title="片区-矩形 (R)">
+          <span class="tool-icon">▭</span><span class="tool-label">矩形区</span>
+        </button>
       </div>
       <div class="tool-divider"></div>
       <div class="tool-section">
-        <button class="tool-btn" data-tool="block-fill" title="街区智能填充 (F)"><span class="tool-icon">▣</span><span class="tool-label">填街区</span></button>
-        <button class="tool-btn" data-tool="boundary" title="划定街区边界 (K)"><span class="tool-icon">✂</span><span class="tool-label">划边界</span></button>
-        <button class="tool-btn" data-tool="block-clear" title="街区清除器"><span class="tool-icon">⌫</span><span class="tool-label">清街区</span></button>
-        <button class="tool-btn" data-tool="district-polygon" title="片区-多边形 (P)"><span class="tool-icon">⬠</span><span class="tool-label">多边形</span></button>
-        <button class="tool-btn" data-tool="district-rect" title="片区-矩形 (R)"><span class="tool-icon">▭</span><span class="tool-label">矩形区</span></button>
+        <button class="tool-btn" data-tool="eraser" title="橡皮擦 (E)">
+          <span class="tool-icon">◯</span><span class="tool-label">橡皮擦</span>
+        </button>
+        <button class="tool-btn" data-tool="annotation" title="标注 (T)">
+          <span class="tool-icon">T</span><span class="tool-label">标注</span>
+        </button>
+        <button class="tool-btn" data-tool="calibrate" title="比例尺校准 (C)">
+          <span class="tool-icon">⌗</span><span class="tool-label">校准</span>
+        </button>
       </div>
       <div class="tool-divider"></div>
       <div class="tool-section">
-        <button class="tool-btn" data-tool="eraser" title="橡皮擦 (E)"><span class="tool-icon">◯</span><span class="tool-label">橡皮擦</span></button>
-        <button class="tool-btn" data-tool="annotation" title="标注 (T)"><span class="tool-icon">T</span><span class="tool-label">标注</span></button>
-        <button class="tool-btn" data-tool="calibrate" title="比例尺校准 (C)"><span class="tool-icon">⌗</span><span class="tool-label">校准</span></button>
-      </div>
-      <div class="tool-divider"></div>
-      <div class="tool-section">
-        <button class="tool-btn" id="deleteBtn" title="删除选中 (Del)"><span class="tool-icon">✕</span><span class="tool-label">删除</span></button>
+        <button class="tool-btn" id="deleteBtn" title="删除选中 (Del)">
+          <span class="tool-icon">✕</span><span class="tool-label">删除</span>
+        </button>
       </div>
       <div class="tool-spacer"></div>
       <div class="tool-section">
-        <button class="tool-btn" id="undoBtn" title="撤销 (Ctrl+Z)"><span class="tool-icon">↶</span><span class="tool-label">撤销</span></button>
-        <button class="tool-btn" id="redoBtn" title="重做 (Ctrl+Y)"><span class="tool-icon">↷</span><span class="tool-label">重做</span></button>
+        <button class="tool-btn" id="undoBtn" title="撤销 (Ctrl+Z)">
+          <span class="tool-icon">↶</span><span class="tool-label">撤销</span>
+        </button>
+        <button class="tool-btn" id="redoBtn" title="重做 (Ctrl+Y)">
+          <span class="tool-icon">↷</span><span class="tool-label">重做</span>
+        </button>
       </div>
     </nav>
+
+    <!-- 选项面板 -->
     <aside id="optionsPanel" class="side-panel">
       <div class="panel-title">工具选项</div>
-      <div id="optionsContent"><div class="opt-hint">选择左侧工具开始绘制</div></div>
+      <div id="optionsContent">
+        <div class="opt-hint">选择左侧工具开始绘制</div>
+      </div>
       <div class="panel-divider"></div>
       <div class="panel-title">底图</div>
       <div class="opt-group">
@@ -69,16 +111,24 @@
         <input type="range" id="basemapOpacity" min="0" max="1" step="0.05" value="0.55">
       </div>
     </aside>
+
+    <!-- 画布区 -->
     <main id="canvasWrap">
       <canvas id="canvas"></canvas>
-      <div id="canvasHint"><span>左键绘制·回车完成 · 右键道路编辑节点 · 右键街区菜单 · 滚轮缩放·空格平移</span></div>
+      <div id="canvasHint">
+        <span>左键绘制·回车完成 · 右键道路/边界菜单编辑 · 右键街区菜单 · 滚轮缩放·空格平移</span>
+      </div>
     </main>
+
+    <!-- 右侧面板 -->
     <aside id="rightPanel" class="side-panel">
       <div class="panel-title">图层</div>
       <div id="layerList"></div>
       <div class="panel-divider"></div>
       <div class="panel-title">属性</div>
-      <div id="propertiesPanel"><div class="prop-empty">未选中对象</div></div>
+      <div id="propertiesPanel">
+        <div class="prop-empty">未选中对象</div>
+      </div>
       <div class="panel-divider"></div>
       <div class="panel-title">视图</div>
       <div class="view-controls">
@@ -88,17 +138,22 @@
       </div>
     </aside>
   </div>
+
+  <!-- ═══ 状态栏 ═══ -->
   <footer id="statusbar">
     <span id="statusCoords">X: 0  Y: 0</span>
     <span id="statusZoom">缩放: 100%</span>
     <span id="statusScale">1px = 5.00m</span>
     <span class="spacer"></span>
     <span id="statusTool">工具: 选择/编辑</span>
-    <span id="statusVersion" style="opacity:0.5;margin-left:12px;">v1.3.0</span>
+    <span id="statusVersion" style="opacity:0.5;margin-left:12px;">v1.3.1</span>
   </footer>
+
+  <!-- 隐藏文件输入 -->
   <input type="file" id="basemapInput" accept="image/*" style="display:none">
   <input type="file" id="projectInput" accept=".json" style="display:none">
 </div>
+
 <script src="js/config.js"></script>
 <script src="js/state.js"></script>
 <script src="js/renderer.js"></script>
