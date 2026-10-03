@@ -1,6 +1,6 @@
 /**
- * tools.js — 绘制工具与交互
- * 左键绘制+回车完成 · 右键编辑道路节点 · 右键菜单 · 街区拆分器 · 路口自动修剪
+ * tools.js — 绘制工具与交互 v1.3.0
+ * 左键绘制+回车完成 · 右键编辑节点 · 铁路/地铁 · 低质量拖拽
  */
 'use strict';
 
@@ -8,14 +8,12 @@ const Tools = (function () {
   let canvas = null;
   let current = 'select';
   let options = {
-    roadLevel: 'arterial',
-    roadName: '',
-    landUseCode: 'R2',
-    districtName: '',
-    annotationText: '标注',
-    annotationSize: 16,
+    roadLevel: 'arterial', roadName: '',
+    railwayLevel: 'trunk', railwayName: '',
+    metroLineId: 'M1', metroName: '',
+    landUseCode: 'R2', districtName: '',
+    annotationText: '标注', annotationSize: 16,
   };
-
   let drawing = null;
   let isDragging = false;
   let dragStart = null;
@@ -34,8 +32,8 @@ const Tools = (function () {
 
   const toolNames = {
     select: '选择/编辑', pan: '平移',
-    'road-bezier': '道路(贝塞尔)', 'road-polyline': '道路(折线)',
-    'road-ramp': '匝道',
+    'road-bezier': '道路(贝塞尔)', 'road-polyline': '道路(折线)', 'road-ramp': '匝道',
+    railway: '铁路', metro: '地铁',
     'block-fill': '街区填充', boundary: '划定街区边界',
     eraser: '橡皮擦', 'block-clear': '街区清除',
     'district-polygon': '片区(多边形)', 'district-rect': '片区(矩形)',
@@ -100,10 +98,8 @@ const Tools = (function () {
   }
 
   function constrainToAxis(from, to) {
-    const dx = to.x - from.x;
-    const dy = to.y - from.y;
-    const adx = Math.abs(dx);
-    const ady = Math.abs(dy);
+    const dx = to.x - from.x, dy = to.y - from.y;
+    const adx = Math.abs(dx), ady = Math.abs(dy);
     if (adx < 0.5 && ady < 0.5) return to;
     const maxDim = Math.max(adx, ady);
     if (Math.abs(adx - ady) < maxDim * 0.35) {
@@ -115,13 +111,11 @@ const Tools = (function () {
   }
 
   function setTool(name) {
-    cancelDrawing();
-    exitEditMode();
+    cancelDrawing(); exitEditMode();
     current = name;
     Renderer.setBoundaryVisible(name === 'boundary');
     canvas.style.cursor = name === 'pan' ? 'grab' :
-      name === 'select' ? 'default' :
-      name === 'eraser' ? 'cell' :
+      name === 'select' ? 'default' : name === 'eraser' ? 'cell' :
       name === 'block-clear' ? 'pointer' : 'crosshair';
     toolListeners.forEach(fn => fn(current));
     Renderer.render();
@@ -138,18 +132,14 @@ const Tools = (function () {
     drawing = null; isDragging = false;
     vertexDrag = null; entityDrag = null; dragUndoRecorded = false;
     calibrateStart = null; dragStart = null;
-    Renderer.setPreview(null);
-    Renderer.setCalibrateLine(null);
+    Renderer.setPreview(null); Renderer.setCalibrateLine(null);
     Renderer.render();
   }
 
   function exitEditMode() {
     if (editModeRoadId) {
-      editModeRoadId = null;
-      extendEnd = null;
-      Renderer.setEditMode(null);
-      Renderer.setGuideLine(null);
-      Renderer.setPreview(null);
+      editModeRoadId = null; extendEnd = null;
+      Renderer.setEditMode(null); Renderer.setGuideLine(null); Renderer.setPreview(null);
       Renderer.render();
     }
   }
@@ -158,54 +148,32 @@ const Tools = (function () {
     mouseDownPos = { x: e.clientX, y: e.clientY };
     mouseDownTime = Date.now();
     hideContextMenu();
-
     if (e.button === 1 || (e.button === 0 && spacePan)) {
       isDragging = true;
       dragStart = { x: e.clientX, y: e.clientY, panX: State.project.view.panX, panY: State.project.view.panY };
-      canvas.style.cursor = 'grabbing';
-      e.preventDefault();
-      return;
+      canvas.style.cursor = 'grabbing'; e.preventDefault(); return;
     }
-
-    if (e.button === 2) {
-      handleRightClick(e);
-      return;
-    }
+    if (e.button === 2) { handleRightClick(e); return; }
     if (e.button !== 0) return;
     const w = toWorld(e.clientX, e.clientY);
-
-    if (editModeRoadId) {
-      handleEditModeClick(w, e);
-      return;
-    }
-
+    if (editModeRoadId) { handleEditModeClick(w, e); return; }
     switch (current) {
       case 'select': handleSelectDown(w); break;
       case 'pan':
         isDragging = true;
         dragStart = { x: e.clientX, y: e.clientY, panX: State.project.view.panX, panY: State.project.view.panY };
-        canvas.style.cursor = 'grabbing';
-        break;
+        canvas.style.cursor = 'grabbing'; break;
       case 'district-rect':
         drawing = { type: 'district', category: options.landUseCode, name: options.districtName, start: w, points: [w, w, w, w] };
-        isDragging = true;
-        break;
-      case 'calibrate':
-        calibrateStart = w; isDragging = true;
-        break;
-      case 'eraser':
-        eraserActive = true;
-        eraseAt(w);
-        break;
-      case 'block-clear':
-        clearBlockAt(w);
-        break;
+        isDragging = true; break;
+      case 'calibrate': calibrateStart = w; isDragging = true; break;
+      case 'eraser': eraserActive = true; eraseAt(w); break;
+      case 'block-clear': clearBlockAt(w); break;
     }
   }
 
   function handleRightClick(e) {
     const w = toWorld(e.clientX, e.clientY);
-
     if (editModeRoadId) {
       const ent = State.getEntity(editModeRoadId);
       if (ent && ent.points) {
@@ -215,32 +183,21 @@ const Tools = (function () {
             if (ent.points.length <= 2) { UI.Modal.alert('至少需要2个节点'); return; }
             State.recordUndo();
             ent.points.splice(i, 1);
-            extendEnd = null;
-            Renderer.setGuideLine(null);
-            if (ent.type === 'road') State.trimTJunctions();
-            refreshAdjacentBlocks(ent);
-            Renderer.render();
-            return;
+            extendEnd = null; Renderer.setGuideLine(null);
+            if (ent.type === 'road') { State.trimTJunctions(); refreshAdjacentBlocks(ent); }
+            Renderer.render(); return;
           }
         }
       }
-      exitEditMode();
-      State.setSelected(null);
-      Renderer.render();
-      return;
+      exitEditMode(); State.setSelected(null); Renderer.render(); return;
     }
-
     const hit = hitTest(w);
     if (hit) {
       State.setSelected(hit.id);
-      if (hit.type === 'road' || hit.type === 'boundary') {
-        editModeRoadId = hit.id;
-        Renderer.setEditMode(hit.id);
-        Renderer.render();
+      if (hit.type === 'road' || hit.type === 'boundary' || hit.type === 'railway' || hit.type === 'metro') {
+        editModeRoadId = hit.id; Renderer.setEditMode(hit.id); Renderer.render();
       } else {
-        const items = [
-          { label: '删除', action: 'del', danger: true, onClick: () => { State.removeEntity(hit.id); Renderer.render(); } },
-        ];
+        const items = [{ label: '删除', action: 'del', danger: true, onClick: () => { State.removeEntity(hit.id); Renderer.render(); } }];
         if (hit.type === 'block' || hit.type === 'district') {
           items.unshift({ label: '更改用地分类…', action: 'cat', onClick: () => {
             UI.Modal.prompt('输入用地分类代码（如 R2、B1、G1）：', hit.category || 'R2').then(input => {
@@ -257,135 +214,93 @@ const Tools = (function () {
         }
         showContextMenu(e.clientX, e.clientY, items);
       }
-    } else {
-      State.setSelected(null);
-      Renderer.render();
-    }
+    } else { State.setSelected(null); Renderer.render(); }
   }
 
   function handleEditModeClick(w, e) {
     const ent = State.getEntity(editModeRoadId);
     if (!ent || !ent.points) { exitEditMode(); return; }
     const isRoad = ent.type === 'road';
-
     let hitIdx = -1;
     for (let i = 0; i < ent.points.length; i++) {
       const p = ent.points[i];
-      if (Math.hypot(w.x - p.x, w.y - p.y) * State.project.view.zoom < CONFIG.vertexHitRadius + 3) {
-        hitIdx = i;
-        break;
-      }
+      if (Math.hypot(w.x - p.x, w.y - p.y) * State.project.view.zoom < CONFIG.vertexHitRadius + 3) { hitIdx = i; break; }
     }
-
     if (hitIdx >= 0) {
       vertexDrag = { entityId: ent.id, pointIndex: hitIdx };
-      if (hitIdx === 0) {
-        extendEnd = 'start';
-      } else if (hitIdx === ent.points.length - 1) {
-        extendEnd = 'end';
-      } else {
-        extendEnd = null;
-      }
-      Renderer.setGuideLine(null);
-      Renderer.render();
-      return;
+      if (hitIdx === 0) extendEnd = 'start';
+      else if (hitIdx === ent.points.length - 1) extendEnd = 'end';
+      else extendEnd = null;
+      Renderer.setGuideLine(null); Renderer.render(); return;
     }
-
     if (extendEnd !== null) {
       State.recordUndo();
       const endPoint = extendEnd === 'start' ? ent.points[0] : ent.points[ent.points.length - 1];
       const target = shiftPressed ? constrainToAxis(endPoint, w) : w;
-      if (extendEnd === 'start') {
-        ent.points.unshift({ x: target.x, y: target.y });
-      } else {
-        ent.points.push({ x: target.x, y: target.y });
-      }
-      if (isRoad) State.trimTJunctions();
-      refreshAdjacentBlocks(ent);
-      Renderer.setPreview(null);
-      Renderer.render();
-      return;
+      if (extendEnd === 'start') ent.points.unshift({ x: target.x, y: target.y });
+      else ent.points.push({ x: target.x, y: target.y });
+      if (isRoad) { State.trimTJunctions(); refreshAdjacentBlocks(ent); }
+      Renderer.setPreview(null); Renderer.render(); return;
     }
-
     const mpp = State.project.meterPerPixel;
     const level = isRoad ? (CONFIG.roadLevels[ent.level] || CONFIG.roadLevels.local) : null;
     const threshold = level ? Math.max(level.width / mpp * 1.5, 30) : 20;
     const d = State.distToPolyline(w.x, w.y, getLineSamples(ent));
-    if (d > threshold) {
-      exitEditMode();
-      State.setSelected(null);
-      Renderer.render();
-    }
-  }
-
-  function distToSeg(px, py, a, b) {
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const len2 = dx * dx + dy * dy;
-    if (len2 === 0) return Math.hypot(px - a.x, py - a.y);
-    let t = ((px - a.x) * dx + (py - a.y) * dy) / len2;
-    t = Math.max(0, Math.min(1, t));
-    return Math.hypot(px - (a.x + t * dx), py - (a.y + t * dy));
+    if (d > threshold) { exitEditMode(); State.setSelected(null); Renderer.render(); }
   }
 
   function onMouseMove(e) {
     const w = toWorld(e.clientX, e.clientY);
     coordListeners.forEach(fn => fn(w));
-
     if (eraserActive) { eraseAt(w); return; }
-
     if (isDragging && dragStart) {
       const dx = e.clientX - dragStart.x, dy = e.clientY - dragStart.y;
       State.setView({ panX: dragStart.panX + dx, panY: dragStart.panY + dy }, true);
-      Renderer.scheduleRender();
-      return;
+      Renderer.setLowQuality(true); Renderer.scheduleRender(); return;
     }
-
     if (vertexDrag) {
       if (!dragUndoRecorded) { State.recordUndo(); dragUndoRecorded = true; }
       const ent = State.getEntity(vertexDrag.entityId);
       if (ent && ent.points) {
         ent.points[vertexDrag.pointIndex] = { x: w.x, y: w.y };
         if (ent.type === 'road') State.trimTJunctions();
-        Renderer.scheduleRender();
+        Renderer.setLowQuality(true); Renderer.scheduleRender();
       }
       return;
     }
-
     if (editModeRoadId && extendEnd !== null && !vertexDrag) {
       const ent = State.getEntity(editModeRoadId);
       if (ent && ent.points && ent.points.length >= 2) {
         let tempPts;
-        if (extendEnd === 'start') {
-          tempPts = [{ x: w.x, y: w.y }, ...ent.points];
-        } else {
-          tempPts = [...ent.points, { x: w.x, y: w.y }];
-        }
+        if (extendEnd === 'start') tempPts = [{ x: w.x, y: w.y }, ...ent.points];
+        else tempPts = [...ent.points, { x: w.x, y: w.y }];
         const sampled = State.sampleSpline(tempPts, CONFIG.splineSegments);
         const isRoad = ent.type === 'road';
+        const isRailway = ent.type === 'railway';
+        const isMetro = ent.type === 'metro';
         const level = isRoad ? (CONFIG.roadLevels[ent.level] || CONFIG.roadLevels.local) : null;
-        const W = level ? level.width / State.project.meterPerPixel : 0;
+        const rwLevel = isRailway ? (CONFIG.railwayLevels[ent.level] || CONFIG.railwayLevels.trunk) : null;
+        const metroCfg = isMetro ? (CONFIG.metroLines.find(l => l.id === ent.lineId) || { color: '#666' }) : null;
+        const W = level ? level.width / State.project.meterPerPixel : (isRailway ? rwLevel.width : CONFIG.metroWidth);
         Renderer.setPreview((ctx, zoom) => {
-          ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-          ctx.globalAlpha = 0.7;
+          ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.globalAlpha = 0.7;
           if (isRoad) {
             if (level && level.edgeColor) {
-              ctx.strokeStyle = level.edgeColor;
-              ctx.lineWidth = W + level.edgeWidth * 2;
+              ctx.strokeStyle = level.edgeColor; ctx.lineWidth = W + level.edgeWidth * 2;
               strokePtsPreview(ctx, sampled);
             }
             if (level && level.centerType === 'red-dashed') {
-              ctx.strokeStyle = level.centerColor;
-              ctx.lineWidth = Math.max(0.3, level.centerWidth);
-              ctx.setLineDash(CONFIG.redDashPattern);
-              strokePtsPreview(ctx, sampled);
-              ctx.setLineDash([]);
+              ctx.strokeStyle = level.centerColor; ctx.lineWidth = Math.max(0.3, level.centerWidth);
+              ctx.setLineDash(CONFIG.redDashPattern); strokePtsPreview(ctx, sampled); ctx.setLineDash([]);
             }
+          } else if (isRailway) {
+            ctx.strokeStyle = rwLevel.color; ctx.lineWidth = W; strokePtsPreview(ctx, sampled);
+          } else if (isMetro) {
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = W + 2; strokePtsPreview(ctx, sampled);
+            ctx.strokeStyle = metroCfg.color; ctx.lineWidth = W; strokePtsPreview(ctx, sampled);
           } else {
-            ctx.strokeStyle = '#4a4a4a';
-            ctx.lineWidth = Math.max(0.6, 1.0 / zoom);
-            ctx.setLineDash([4, 3]);
-            strokePtsPreview(ctx, sampled);
-            ctx.setLineDash([]);
+            ctx.strokeStyle = '#4a4a4a'; ctx.lineWidth = Math.max(0.6, 1.0 / zoom);
+            ctx.setLineDash([4, 3]); strokePtsPreview(ctx, sampled); ctx.setLineDash([]);
           }
           ctx.globalAlpha = 1;
         });
@@ -393,64 +308,51 @@ const Tools = (function () {
       }
       return;
     }
-
     if (entityDrag) {
       if (!dragUndoRecorded) { State.recordUndo(); dragUndoRecorded = true; }
       const ent = State.getEntity(entityDrag.entityId);
       if (ent && ent.points) {
         for (const p of ent.points) { p.x = w.x + entityDrag.offsetX; p.y = w.y + entityDrag.offsetY; }
-        Renderer.scheduleRender();
+        Renderer.setLowQuality(true); Renderer.scheduleRender();
       }
       return;
     }
-
     if (current === 'district-rect' && drawing && isDragging) {
       const s = drawing.start;
-      drawing.points = [
-        { x: s.x, y: s.y }, { x: w.x, y: s.y },
-        { x: w.x, y: w.y }, { x: s.x, y: w.y },
-      ];
-      updatePreview();
-      return;
+      drawing.points = [{ x: s.x, y: s.y }, { x: w.x, y: s.y }, { x: w.x, y: w.y }, { x: s.x, y: w.y }];
+      updatePreview(); return;
     }
-
     if (current === 'calibrate' && calibrateStart && isDragging) {
       Renderer.setCalibrateLine({ x1: calibrateStart.x, y1: calibrateStart.y, x2: w.x, y2: w.y });
-      Renderer.scheduleRender();
-      return;
+      Renderer.scheduleRender(); return;
     }
-
-    if ((current === 'road-bezier' || current === 'road-polyline' || current === 'road-ramp' || current === 'boundary' || current === 'district-polygon') && drawing) {
+    if ((current === 'road-bezier' || current === 'road-polyline' || current === 'road-ramp' || current === 'boundary' || current === 'railway' || current === 'metro' || current === 'district-polygon') && drawing) {
       if (shiftPressed && drawing.points.length > 0) {
         drawing.previewPoint = constrainToAxis(drawing.points[drawing.points.length - 1], w);
-      } else {
-        drawing.previewPoint = w;
-      }
+      } else { drawing.previewPoint = w; }
       updatePreview();
     }
   }
 
   function onMouseUp(e) {
+    Renderer.setLowQuality(false);
     if (eraserActive) { eraserActive = false; return; }
     if (isDragging && dragStart) {
       isDragging = false; dragStart = null;
       canvas.style.cursor = current === 'pan' ? 'grab' : (current === 'select' ? 'default' : 'crosshair');
-      return;
+      Renderer.render(); return;
     }
     if (vertexDrag) {
       const ent = State.getEntity(vertexDrag.entityId);
       vertexDrag = null; dragUndoRecorded = false;
-      if (ent) refreshAdjacentBlocks(ent);
-      Renderer.render();
-      return;
+      if (ent && ent.type === 'road') refreshAdjacentBlocks(ent);
+      Renderer.render(); return;
     }
     if (entityDrag) { entityDrag = null; dragUndoRecorded = false; Renderer.render(); return; }
-
     const isClick = mouseDownPos &&
       Math.hypot(e.clientX - mouseDownPos.x, e.clientY - mouseDownPos.y) < 5 &&
       Date.now() - mouseDownTime < 400;
     mouseDownPos = null;
-
     if (current === 'district-rect' && drawing) { finishRectDistrict(); return; }
     if (current === 'calibrate' && calibrateStart) { finishCalibrate(e); return; }
     if (isClick && e.button === 0) handleClick(e);
@@ -464,13 +366,25 @@ const Tools = (function () {
 
   function handleClick(e) {
     const w = toWorld(e.clientX, e.clientY);
-
     if (current === 'road-bezier' || current === 'road-polyline' || current === 'road-ramp' || current === 'boundary') {
       const level = current === 'road-ramp' ? 'ramp' : options.roadLevel;
       const curve = (current === 'road-bezier' || current === 'road-ramp' || current === 'boundary') ? 'bezier' : 'polyline';
       const type = current === 'boundary' ? 'boundary' : 'road';
       if (!drawing) {
         drawing = { type, level, curve, name: options.roadName, points: [{ x: w.x, y: w.y }], previewPoint: w };
+      } else {
+        const last = drawing.points[drawing.points.length - 1];
+        const target = shiftPressed ? constrainToAxis(last, w) : w;
+        if (Math.hypot(target.x - last.x, target.y - last.y) > 1) drawing.points.push({ x: target.x, y: target.y });
+      }
+      updatePreview();
+    } else if (current === 'railway' || current === 'metro') {
+      const type = current; const curve = 'bezier';
+      if (!drawing) {
+        const init = { type, curve, points: [{ x: w.x, y: w.y }], previewPoint: w };
+        if (type === 'railway') { init.level = options.railwayLevel; init.name = options.railwayName; }
+        else { init.lineId = options.metroLineId; init.name = options.metroName; init.transfers = []; }
+        drawing = init;
       } else {
         const last = drawing.points[drawing.points.length - 1];
         const target = shiftPressed ? constrainToAxis(last, w) : w;
@@ -489,16 +403,13 @@ const Tools = (function () {
         if (Math.hypot(w.x - last.x, w.y - last.y) > 1) drawing.points.push({ x: w.x, y: w.y });
       }
       updatePreview();
-    } else if (current === 'block-fill') {
-      fillBlockAt(w.x, w.y);
-    } else if (current === 'annotation') {
+    } else if (current === 'block-fill') { fillBlockAt(w.x, w.y); }
+    else if (current === 'annotation') {
       if (options.annotationText) {
         State.addEntity({ type: 'annotation', x: w.x, y: w.y, text: options.annotationText, fontSize: options.annotationSize, color: '#1a1a1a', align: 'left' });
       } else {
         UI.Modal.prompt('请输入标注文字：', '标注').then(text => {
-          if (text) {
-            State.addEntity({ type: 'annotation', x: w.x, y: w.y, text, fontSize: options.annotationSize, color: '#1a1a1a', align: 'left' });
-          }
+          if (text) State.addEntity({ type: 'annotation', x: w.x, y: w.y, text, fontSize: options.annotationSize, color: '#1a1a1a', align: 'left' });
         });
       }
     }
@@ -506,23 +417,18 @@ const Tools = (function () {
 
   function finishByEnter() {
     if (!drawing) return;
-    if (drawing.type === 'road' && drawing.points.length >= 2) {
-      finishRoad();
-    } else if (drawing.type === 'boundary' && drawing.points.length >= 2) {
-      finishBoundary();
-    } else if (drawing.type === 'district' && drawing.points.length >= 3) {
-      finishPolygonDistrict();
-    } else {
-      cancelDrawing();
-      Renderer.render();
-    }
+    if (drawing.type === 'road' && drawing.points.length >= 2) finishRoad();
+    else if (drawing.type === 'boundary' && drawing.points.length >= 2) finishBoundary();
+    else if (drawing.type === 'railway' && drawing.points.length >= 2) finishRailway();
+    else if (drawing.type === 'metro' && drawing.points.length >= 2) finishMetro();
+    else if (drawing.type === 'district' && drawing.points.length >= 3) finishPolygonDistrict();
+    else { cancelDrawing(); Renderer.render(); }
   }
 
   function finishRoad() {
     if (!drawing || drawing.points.length < 2) { drawing = null; Renderer.setPreview(null); Renderer.render(); return; }
     const newRoad = State.addEntity({ type: 'road', level: drawing.level, curve: drawing.curve, name: drawing.name, points: drawing.points.map(p => ({ x: p.x, y: p.y })) });
-    drawing = null;
-    Renderer.setPreview(null);
+    drawing = null; Renderer.setPreview(null);
     State.trimTJunctions();
     const roadSamples = State.getRoadSamples(newRoad);
     const splitCount = splitIntersectedBlocks(roadSamples);
@@ -537,23 +443,30 @@ const Tools = (function () {
     const pts = drawing.points.map(p => ({ x: p.x, y: p.y }));
     const curve = drawing.curve;
     State.addEntity({ type: 'boundary', curve, points: pts });
-
     const curvePts = curve === 'bezier' ? State.sampleSpline(pts, CONFIG.splineSegments) : pts;
     const splitCount = splitIntersectedBlocks(curvePts);
     const boundaryEntity = State.project.entities[State.project.entities.length - 1];
     refreshAdjacentBlocks(boundaryEntity);
-
     if (splitCount > 0) showToast(`已拆分 ${splitCount} 个街区`);
-    drawing = null;
-    Renderer.setPreview(null);
-    Renderer.render();
+    drawing = null; Renderer.setPreview(null); Renderer.render();
+  }
+
+  function finishRailway() {
+    if (!drawing || drawing.points.length < 2) { drawing = null; Renderer.setPreview(null); Renderer.render(); return; }
+    State.addEntity({ type: 'railway', level: drawing.level, curve: drawing.curve, name: drawing.name, points: drawing.points.map(p => ({ x: p.x, y: p.y })) });
+    drawing = null; Renderer.setPreview(null); Renderer.render();
+  }
+
+  function finishMetro() {
+    if (!drawing || drawing.points.length < 2) { drawing = null; Renderer.setPreview(null); Renderer.render(); return; }
+    State.addEntity({ type: 'metro', lineId: drawing.lineId, curve: drawing.curve, name: drawing.name, transfers: drawing.transfers || [], points: drawing.points.map(p => ({ x: p.x, y: p.y })) });
+    drawing = null; Renderer.setPreview(null); Renderer.render();
   }
 
   function finishPolygonDistrict() {
     if (!drawing || drawing.points.length < 3) { drawing = null; Renderer.setPreview(null); Renderer.render(); return; }
     State.addEntity({ type: 'district', category: drawing.category, name: drawing.name, points: drawing.points.map(p => ({ x: p.x, y: p.y })) });
-    drawing = null;
-    Renderer.setPreview(null);
+    drawing = null; Renderer.setPreview(null);
   }
 
   function finishRectDistrict() {
@@ -561,8 +474,7 @@ const Tools = (function () {
     const s = drawing.points[0], ep = drawing.points[2];
     if (Math.abs(ep.x - s.x) < 2 || Math.abs(ep.y - s.y) < 2) { drawing = null; Renderer.setPreview(null); Renderer.render(); return; }
     State.addEntity({ type: 'district', category: drawing.category, name: drawing.name, points: drawing.points.map(p => ({ x: p.x, y: p.y })) });
-    drawing = null;
-    Renderer.setPreview(null);
+    drawing = null; Renderer.setPreview(null);
   }
 
   function finishCalibrate(e) {
@@ -585,17 +497,12 @@ const Tools = (function () {
   function fillBlockAt(worldX, worldY) {
     const roads = State.project.entities.filter(e => e.type === 'road' && e.points && e.points.length >= 2);
     if (roads.length === 0) { UI.Modal.alert('请先绘制道路，再使用街区填充。'); return; }
-
     const existingBlocks = State.project.entities.filter(e => e.type === 'block' && e.points);
     for (const blk of existingBlocks) {
       if (State.pointInPolygon(worldX, worldY, blk.points)) {
-        State.recordUndo();
-        State.updateEntity(blk.id, { category: options.landUseCode });
-        Renderer.render();
-        return;
+        State.recordUndo(); State.updateEntity(blk.id, { category: options.landUseCode }); Renderer.render(); return;
       }
     }
-
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const r of roads) {
       const pts = State.getRoadSamples(r);
@@ -607,63 +514,46 @@ const Tools = (function () {
         minY = Math.min(minY, p.y - halfW); maxY = Math.max(maxY, p.y + halfW);
       }
     }
-    const pad = 80;
-    minX -= pad; minY -= pad; maxX += pad; maxY += pad;
+    const pad = 80; minX -= pad; minY -= pad; maxX += pad; maxY += pad;
     const scale = 4;
-    const ow = Math.ceil((maxX - minX) * scale);
-    const oh = Math.ceil((maxY - minY) * scale);
+    const ow = Math.ceil((maxX - minX) * scale), oh = Math.ceil((maxY - minY) * scale);
     if (ow > 10000 || oh > 10000) { UI.Modal.alert('区域过大，请缩小视图后再试。'); return; }
-
     const off = document.createElement('canvas');
     off.width = ow; off.height = oh;
     const octx = off.getContext('2d');
-    octx.fillStyle = '#ffffff';
-    octx.fillRect(0, 0, ow, oh);
-    octx.scale(scale, scale);
-    octx.translate(-minX, -minY);
-    octx.lineCap = 'round';
-    octx.lineJoin = 'round';
+    octx.fillStyle = '#ffffff'; octx.fillRect(0, 0, ow, oh);
+    octx.scale(scale, scale); octx.translate(-minX, -minY);
+    octx.lineCap = 'round'; octx.lineJoin = 'round';
     for (const r of roads) {
       const pts = State.getRoadSamples(r);
       const mpp = State.project.meterPerPixel;
       const level = CONFIG.roadLevels[r.level] || CONFIG.roadLevels.local;
       const w = level.width / mpp + (level.edgeWidth || 0) * 2 + 2;
-      octx.strokeStyle = '#000000';
-      octx.lineWidth = w;
-      octx.beginPath();
-      octx.moveTo(pts[0].x, pts[0].y);
+      octx.strokeStyle = '#000000'; octx.lineWidth = w;
+      octx.beginPath(); octx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) octx.lineTo(pts[i].x, pts[i].y);
       octx.stroke();
     }
     const boundaries = State.project.entities.filter(e => e.type === 'boundary' && e.points && e.points.length >= 2);
     for (const b of boundaries) {
       const pts = b.curve === 'bezier' ? State.sampleSpline(b.points, CONFIG.splineSegments) : b.points;
-      octx.strokeStyle = '#000000';
-      octx.lineWidth = 1;
-      octx.beginPath();
-      octx.moveTo(pts[0].x, pts[0].y);
+      octx.strokeStyle = '#000000'; octx.lineWidth = 1;
+      octx.beginPath(); octx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) octx.lineTo(pts[i].x, pts[i].y);
       octx.stroke();
     }
-
-    const seedX = (worldX - minX) * scale;
-    const seedY = (worldY - minY) * scale;
+    const seedX = (worldX - minX) * scale, seedY = (worldY - minY) * scale;
     const result = State.floodFillContour(octx, seedX, seedY);
     if (result.leaked) { UI.Modal.alert('该区域未被道路完全围合，无法填充。请检查道路是否闭合。'); return; }
     if (result.points.length < 6) { UI.Modal.alert('未检测到有效的街区区域。'); return; }
-
     const worldPts = result.points.map(([px, py]) => ({ x: px / scale + minX, y: py / scale + minY }));
     const simplified = State.simplifyDP(worldPts, 0.5 / scale);
     if (simplified.length < 3) { UI.Modal.alert('区域过小。'); return; }
     const smoothed = State.smoothChaikinClosed(simplified, 1);
-
     const center = State.polygonCenter(smoothed);
     for (const blk of existingBlocks) {
       if (State.pointInPolygon(center.x, center.y, blk.points)) {
-        State.recordUndo();
-        State.updateEntity(blk.id, { category: options.landUseCode });
-        Renderer.render();
-        return;
+        State.recordUndo(); State.updateEntity(blk.id, { category: options.landUseCode }); Renderer.render(); return;
       }
     }
     State.addEntity({ type: 'block', category: options.landUseCode, name: options.districtName, points: smoothed });
@@ -673,62 +563,57 @@ const Tools = (function () {
   function updatePreview() {
     if (!drawing) { Renderer.setPreview(null); Renderer.scheduleRender(); return; }
     Renderer.setPreview((ctx, zoom) => {
-      if (drawing.type === 'road' || drawing.type === 'boundary') {
+      if (drawing.type === 'road' || drawing.type === 'boundary' || drawing.type === 'railway' || drawing.type === 'metro') {
         const pts = drawing.curve === 'bezier' ? State.sampleSpline(drawing.points, CONFIG.splineSegments) : drawing.points;
         const isBoundary = drawing.type === 'boundary';
+        const isRailway = drawing.type === 'railway';
+        const isMetro = drawing.type === 'metro';
         const level = CONFIG.roadLevels[drawing.level] || CONFIG.roadLevels.local;
-        const W = level.width / State.project.meterPerPixel;
+        const rwLevel = CONFIG.railwayLevels[drawing.level] || CONFIG.railwayLevels.trunk;
+        const metroCfg = CONFIG.metroLines.find(l => l.id === drawing.lineId) || { color: '#666' };
+        const W = isRailway ? rwLevel.width : (isMetro ? CONFIG.metroWidth : level.width / State.project.meterPerPixel);
         if (isBoundary) {
-          ctx.strokeStyle = '#4a4a4a';
-          ctx.globalAlpha = 0.8;
-          ctx.lineWidth = Math.max(0.6, 1.0 / zoom);
-          ctx.setLineDash([4, 3]);
+          ctx.strokeStyle = '#4a4a4a'; ctx.globalAlpha = 0.8;
+          ctx.lineWidth = Math.max(0.6, 1.0 / zoom); ctx.setLineDash([4, 3]);
           ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+          strokePreview(ctx, pts, drawing.previewPoint); ctx.setLineDash([]);
+        } else if (isRailway) {
+          ctx.strokeStyle = rwLevel.color; ctx.globalAlpha = 0.6;
+          ctx.lineWidth = W; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
           strokePreview(ctx, pts, drawing.previewPoint);
-          ctx.setLineDash([]);
+        } else if (isMetro) {
+          ctx.globalAlpha = 0.6;
+          ctx.strokeStyle = '#fff'; ctx.lineWidth = W + 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+          strokePreview(ctx, pts, drawing.previewPoint);
+          ctx.strokeStyle = metroCfg.color; ctx.lineWidth = W;
+          strokePreview(ctx, pts, drawing.previewPoint);
         } else {
           if (level.edgeColor) {
-            ctx.strokeStyle = level.edgeColor;
-            ctx.globalAlpha = 0.5;
-            ctx.lineWidth = W + (level.edgeWidth || 0) * 2;
-            ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+            ctx.strokeStyle = level.edgeColor; ctx.globalAlpha = 0.5;
+            ctx.lineWidth = W + (level.edgeWidth || 0) * 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
             strokePreview(ctx, pts, drawing.previewPoint);
           }
           if (level.centerType === 'red-dashed') {
-            ctx.strokeStyle = level.centerColor;
-            ctx.globalAlpha = 0.7;
+            ctx.strokeStyle = level.centerColor; ctx.globalAlpha = 0.7;
             ctx.lineWidth = Math.max(0.3, level.centerWidth || 0.5);
-            ctx.setLineDash(CONFIG.redDashPattern);
-            strokePreview(ctx, pts, drawing.previewPoint);
-            ctx.setLineDash([]);
+            ctx.setLineDash(CONFIG.redDashPattern); strokePreview(ctx, pts, drawing.previewPoint); ctx.setLineDash([]);
           }
         }
         ctx.globalAlpha = 1;
         for (const p of drawing.points) {
-          ctx.fillStyle = isBoundary ? '#4a4a4a' : '#ff6b35';
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, 3.5 / zoom, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.fillStyle = isBoundary ? '#4a4a4a' : (isRailway ? '#1a1a1a' : (isMetro ? metroCfg.color : '#ff6b35'));
+          ctx.beginPath(); ctx.arc(p.x, p.y, 3.5 / zoom, 0, Math.PI * 2); ctx.fill();
         }
       } else if (drawing.type === 'district') {
         const cat = getLandUseByCode(drawing.category) || { color: '#ccc' };
-        ctx.beginPath();
-        ctx.moveTo(drawing.points[0].x, drawing.points[0].y);
+        ctx.beginPath(); ctx.moveTo(drawing.points[0].x, drawing.points[0].y);
         for (let i = 1; i < drawing.points.length; i++) ctx.lineTo(drawing.points[i].x, drawing.points[i].y);
         if (drawing.previewPoint) ctx.lineTo(drawing.previewPoint.x, drawing.previewPoint.y);
         if (drawing.points.length >= 3) ctx.closePath();
-        ctx.fillStyle = cat.color;
-        ctx.globalAlpha = 0.5;
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-        ctx.lineWidth = 0.8 / zoom;
-        ctx.stroke();
+        ctx.fillStyle = cat.color; ctx.globalAlpha = 0.5; ctx.fill(); ctx.globalAlpha = 1;
+        ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 0.8 / zoom; ctx.stroke();
         for (const p of drawing.points) {
-          ctx.fillStyle = '#ff6b35';
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, 3.5 / zoom, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.fillStyle = '#ff6b35'; ctx.beginPath(); ctx.arc(p.x, p.y, 3.5 / zoom, 0, Math.PI * 2); ctx.fill();
         }
       }
     });
@@ -736,16 +621,13 @@ const Tools = (function () {
   }
 
   function strokePreview(ctx, pts, previewPoint) {
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
+    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
     if (previewPoint) ctx.lineTo(previewPoint.x, previewPoint.y);
     ctx.stroke();
   }
-
   function strokePtsPreview(ctx, pts) {
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
+    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
     ctx.stroke();
   }
@@ -757,8 +639,7 @@ const Tools = (function () {
       for (let i = 0; i < sel.points.length; i++) {
         const p = sel.points[i];
         if (Math.hypot(w.x - p.x, w.y - p.y) * State.project.view.zoom < CONFIG.vertexHitRadius) {
-          vertexDrag = { entityId: sel.id, pointIndex: i };
-          return;
+          vertexDrag = { entityId: sel.id, pointIndex: i }; return;
         }
       }
     }
@@ -768,9 +649,7 @@ const Tools = (function () {
       if (hit.points && hit.points.length > 0 && !editModeRoadId && hit.type !== 'block') {
         entityDrag = { entityId: hit.id, offsetX: hit.points[0].x - w.x, offsetY: hit.points[0].y - w.y };
       }
-    } else {
-      State.setSelected(null);
-    }
+    } else { State.setSelected(null); }
   }
 
   function hitTest(w) {
@@ -786,6 +665,11 @@ const Tools = (function () {
         const pts = State.getRoadSamples(e);
         const level = CONFIG.roadLevels[e.level] || CONFIG.roadLevels.local;
         const width = level.width / State.project.meterPerPixel;
+        const tol = Math.max(width / 2, CONFIG.roadHitTolerance / zoom);
+        if (State.distToPolyline(w.x, w.y, pts) < tol) return e;
+      } else if ((e.type === 'railway' || e.type === 'metro') && e.points && e.points.length >= 2) {
+        const pts = getLineSamples(e);
+        const width = e.type === 'railway' ? (CONFIG.railwayLevels[e.level] || CONFIG.railwayLevels.trunk).width : CONFIG.metroWidth;
         const tol = Math.max(width / 2, CONFIG.roadHitTolerance / zoom);
         if (State.distToPolyline(w.x, w.y, pts) < tol) return e;
       } else if (e.type === 'boundary' && e.points && e.points.length >= 2) {
@@ -805,28 +689,18 @@ const Tools = (function () {
     if (e.key === 'Enter') {
       if (drawing) { e.preventDefault(); finishByEnter(); return; }
       if (editModeRoadId && extendEnd !== null) {
-        e.preventDefault();
-        extendEnd = null;
-        Renderer.setGuideLine(null);
-        Renderer.setPreview(null);
-        Renderer.render();
-        return;
+        e.preventDefault(); extendEnd = null; Renderer.setGuideLine(null); Renderer.setPreview(null); Renderer.render(); return;
       }
       if (editModeRoadId) { e.preventDefault(); exitEditMode(); State.setSelected(null); Renderer.render(); return; }
     }
-    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
-      e.preventDefault(); State.undo(); Renderer.render(); return;
-    }
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
-      e.preventDefault(); State.redo(); Renderer.render(); return;
-    }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); State.undo(); Renderer.render(); return; }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); State.redo(); Renderer.render(); return; }
     if (e.key === 'Delete' || e.key === 'Backspace') {
       const sel = State.getSelected();
-      if (sel) { e.preventDefault(); State.removeEntity(sel.id); exitEditMode(); Renderer.render(); }
-      return;
+      if (sel) { e.preventDefault(); State.removeEntity(sel.id); exitEditMode(); Renderer.render(); } return;
     }
     if (e.key === 'Escape') { cancelDrawing(); exitEditMode(); State.setSelected(null); Renderer.render(); return; }
-    const keyMap = { v: 'select', h: 'pan', b: 'road-bezier', l: 'road-polyline', m: 'road-ramp', f: 'block-fill', k: 'boundary', e: 'eraser', p: 'district-polygon', r: 'district-rect', t: 'annotation', c: 'calibrate' };
+    const keyMap = { v: 'select', h: 'pan', b: 'road-bezier', l: 'road-polyline', m: 'road-ramp', n: 'railway', u: 'metro', f: 'block-fill', k: 'boundary', e: 'eraser', p: 'district-polygon', r: 'district-rect', t: 'annotation', c: 'calibrate' };
     if (keyMap[e.key]) setTool(keyMap[e.key]);
   }
 
@@ -844,8 +718,10 @@ const Tools = (function () {
     const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
     const newZoom = Math.max(CONFIG.minZoom, Math.min(CONFIG.maxZoom, view.zoom * factor));
     State.setView({ zoom: newZoom, panX: sx - wx * newZoom, panY: sy - wy * newZoom }, true);
-    Renderer.scheduleRender();
+    Renderer.setLowQuality(true); Renderer.scheduleRender();
     zoomListeners.forEach(fn => fn(newZoom));
+    clearTimeout(onWheel._resetTimer);
+    onWheel._resetTimer = setTimeout(() => { Renderer.setLowQuality(false); Renderer.render(); }, 150);
   }
 
   function deleteSelected() {
@@ -857,55 +733,43 @@ const Tools = (function () {
     const zoom = State.project.view.zoom;
     const hitR = CONFIG.vertexHitRadius / zoom;
     let erased = false;
-
     const lineEntities = State.project.entities.filter(e =>
-      (e.type === 'road' || e.type === 'boundary') && e.points && e.points.length >= 2);
-
+      (e.type === 'road' || e.type === 'boundary' || e.type === 'railway' || e.type === 'metro') && e.points && e.points.length >= 2);
     for (const ent of lineEntities) {
       for (let i = 0; i < ent.points.length; i++) {
         const p = ent.points[i];
         if (Math.hypot(w.x - p.x, w.y - p.y) < hitR) {
-          State.recordUndo();
-          splitOrRemoveNode(ent, i);
-          erased = true;
-          break;
+          State.recordUndo(); splitOrRemoveNode(ent, i); erased = true; break;
         }
       }
       if (erased) break;
     }
-    if (erased) {
-      State.trimTJunctions();
-      Renderer.render();
-    }
+    if (erased) { State.trimTJunctions(); Renderer.render(); }
   }
 
   function splitOrRemoveNode(ent, idx) {
     const pts = ent.points;
-    if (pts.length <= 2) {
-      removeEntityAndBlocks(ent);
-      return;
-    }
+    if (pts.length <= 2) { removeEntityAndBlocks(ent); return; }
     if (idx === 0 || idx === pts.length - 1) {
-      pts.splice(idx, 1);
-      removeBlocksAdjacentTo(ent);
+      pts.splice(idx, 1); removeBlocksAdjacentTo(ent);
     } else {
       const leftPts = pts.slice(0, idx);
       const rightPts = pts.slice(idx + 1);
-      State.removeEntity(ent.id);
-      removeBlocksAdjacentTo(ent);
+      State.removeEntity(ent.id); removeBlocksAdjacentTo(ent);
       if (leftPts.length >= 2) {
-        State.addEntity({ type: ent.type, level: ent.level, name: ent.name, curve: ent.curve, points: leftPts });
+        const ne = { type: ent.type, level: ent.level, name: ent.name, curve: ent.curve, points: leftPts };
+        if (ent.type === 'metro') { ne.lineId = ent.lineId; ne.transfers = (ent.transfers || []).slice(0, idx); }
+        State.addEntity(ne);
       }
       if (rightPts.length >= 2) {
-        State.addEntity({ type: ent.type, level: ent.level, name: ent.name, curve: ent.curve, points: rightPts });
+        const ne = { type: ent.type, level: ent.level, name: ent.name, curve: ent.curve, points: rightPts };
+        if (ent.type === 'metro') { ne.lineId = ent.lineId; ne.transfers = (ent.transfers || []).slice(idx + 1); }
+        State.addEntity(ne);
       }
     }
   }
 
-  function removeEntityAndBlocks(ent) {
-    removeBlocksAdjacentTo(ent);
-    State.removeEntity(ent.id);
-  }
+  function removeEntityAndBlocks(ent) { removeBlocksAdjacentTo(ent); State.removeEntity(ent.id); }
 
   function removeBlocksAdjacentTo(lineEnt) {
     if (!lineEnt.points) return;
@@ -914,13 +778,9 @@ const Tools = (function () {
     const blocks = State.project.entities.filter(e => e.type === 'block' && e.points);
     for (const blk of blocks) {
       let adjacent = false;
-      for (const sp of samples) {
-        if (State.pointInPolygon(sp.x, sp.y, blk.points)) { adjacent = true; break; }
-      }
+      for (const sp of samples) { if (State.pointInPolygon(sp.x, sp.y, blk.points)) { adjacent = true; break; } }
       if (!adjacent) {
-        for (const bp of blk.points) {
-          if (State.distToPolyline(bp.x, bp.y, samples) < 5) { adjacent = true; break; }
-        }
+        for (const bp of blk.points) { if (State.distToPolyline(bp.x, bp.y, samples) < 5) { adjacent = true; break; } }
       }
       if (adjacent) State.removeEntity(blk.id);
     }
@@ -930,10 +790,7 @@ const Tools = (function () {
     const blocks = State.project.entities.filter(e => e.type === 'block' && e.points);
     for (const blk of blocks) {
       if (State.pointInPolygon(w.x, w.y, blk.points)) {
-        State.recordUndo();
-        State.removeEntity(blk.id);
-        Renderer.render();
-        return;
+        State.recordUndo(); State.removeEntity(blk.id); Renderer.render(); return;
       }
     }
   }
@@ -942,13 +799,8 @@ const Tools = (function () {
   function showToast(msg, duration) {
     duration = duration || 2500;
     let el = document.getElementById('toast');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'toast';
-      document.body.appendChild(el);
-    }
-    el.textContent = msg;
-    el.classList.add('show');
+    if (!el) { el = document.createElement('div'); el.id = 'toast'; document.body.appendChild(el); }
+    el.textContent = msg; el.classList.add('show');
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(() => el.classList.remove('show'), duration);
   }
@@ -963,45 +815,27 @@ const Tools = (function () {
       const level = CONFIG.roadLevels[entity.level] || CONFIG.roadLevels.local;
       threshold = level.width / mpp / 2 + 25;
     }
-
     const affected = [];
     for (const blk of blocks) {
       let adjacent = false;
-      for (const sp of samples) {
-        if (State.pointInPolygon(sp.x, sp.y, blk.points)) { adjacent = true; break; }
-      }
+      for (const sp of samples) { if (State.pointInPolygon(sp.x, sp.y, blk.points)) { adjacent = true; break; } }
       if (!adjacent) {
-        for (const bp of blk.points) {
-          if (State.distToPolyline(bp.x, bp.y, samples) < threshold) { adjacent = true; break; }
-        }
+        for (const bp of blk.points) { if (State.distToPolyline(bp.x, bp.y, samples) < threshold) { adjacent = true; break; } }
       }
       if (adjacent) affected.push(blk);
     }
     if (affected.length === 0) return;
-
-    const toRefill = affected.map(blk => ({
-      category: blk.category,
-      name: blk.name,
-      center: State.polygonCenter(blk.points),
-    }));
+    const toRefill = affected.map(blk => ({ category: blk.category, name: blk.name, center: State.polygonCenter(blk.points) }));
     for (const blk of affected) State.removeEntity(blk.id, true);
-
     let refreshed = 0, removed = 0;
     for (const info of toRefill) {
       const currentBlocks = State.project.entities.filter(e => e.type === 'block' && e.points);
       let claimed = false;
-      for (const blk of currentBlocks) {
-        if (State.pointInPolygon(info.center.x, info.center.y, blk.points)) { claimed = true; break; }
-      }
+      for (const blk of currentBlocks) { if (State.pointInPolygon(info.center.x, info.center.y, blk.points)) { claimed = true; break; } }
       if (claimed) { refreshed++; continue; }
-
       const newPts = tryRefillAtWithFallback(info.center.x, info.center.y);
-      if (newPts && newPts.length >= 3) {
-        State.addEntity({ type: 'block', category: info.category, name: info.name, points: newPts }, true);
-        refreshed++;
-      } else {
-        removed++;
-      }
+      if (newPts && newPts.length >= 3) { State.addEntity({ type: 'block', category: info.category, name: info.name, points: newPts }, true); refreshed++; }
+      else { removed++; }
     }
     if (refreshed > 0) showToast(`已自动刷新 ${refreshed} 个街区`);
     if (removed > 0) showToast(`${removed} 个街区因边界变动已清除`, 3500);
@@ -1011,14 +845,12 @@ const Tools = (function () {
     const roads = State.project.entities.filter(e => e.type === 'road' && e.points && e.points.length >= 2);
     const boundaries = State.project.entities.filter(e => e.type === 'boundary' && e.points && e.points.length >= 2);
     if (roads.length === 0 && boundaries.length === 0) return null;
-
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     const allLines = [...roads, ...boundaries];
     for (const r of allLines) {
       const pts = getLineSamples(r);
       const mpp = State.project.meterPerPixel;
-      const halfW = r.type === 'road' ?
-        (CONFIG.roadLevels[r.level] || CONFIG.roadLevels.local).width / mpp / 2 + 6 : 3;
+      const halfW = r.type === 'road' ? (CONFIG.roadLevels[r.level] || CONFIG.roadLevels.local).width / mpp / 2 + 6 : 3;
       for (const p of pts) {
         minX = Math.min(minX, p.x - halfW); maxX = Math.max(maxX, p.x + halfW);
         minY = Math.min(minY, p.y - halfW); maxY = Math.max(maxY, p.y + halfW);
@@ -1028,29 +860,24 @@ const Tools = (function () {
     const scale = 4;
     const ow = Math.ceil((maxX - minX) * scale), oh = Math.ceil((maxY - minY) * scale);
     if (ow > 10000 || oh > 10000) return null;
-
     const off = document.createElement('canvas');
     off.width = ow; off.height = oh;
     const octx = off.getContext('2d');
-    octx.fillStyle = '#ffffff';
-    octx.fillRect(0, 0, ow, oh);
-    octx.scale(scale, scale);
-    octx.translate(-minX, -minY);
+    octx.fillStyle = '#ffffff'; octx.fillRect(0, 0, ow, oh);
+    octx.scale(scale, scale); octx.translate(-minX, -minY);
     octx.lineCap = 'round'; octx.lineJoin = 'round';
     for (const r of roads) {
       const pts = State.getRoadSamples(r);
       const mpp = State.project.meterPerPixel;
       const level = CONFIG.roadLevels[r.level] || CONFIG.roadLevels.local;
-      octx.strokeStyle = '#000';
-      octx.lineWidth = level.width / mpp + (level.edgeWidth || 0) * 2 + 2;
+      octx.strokeStyle = '#000'; octx.lineWidth = level.width / mpp + (level.edgeWidth || 0) * 2 + 2;
       octx.beginPath(); octx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) octx.lineTo(pts[i].x, pts[i].y);
       octx.stroke();
     }
     for (const b of boundaries) {
       const pts = getLineSamples(b);
-      octx.strokeStyle = '#000';
-      octx.lineWidth = 1;
+      octx.strokeStyle = '#000'; octx.lineWidth = 1;
       octx.beginPath(); octx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) octx.lineTo(pts[i].x, pts[i].y);
       octx.stroke();
@@ -1080,15 +907,10 @@ const Tools = (function () {
     let splitCount = 0;
     for (const block of blocks) {
       let intersects = false;
-      for (const cp of lineSamples) {
-        if (State.pointInPolygon(cp.x, cp.y, block.points)) { intersects = true; break; }
-      }
+      for (const cp of lineSamples) { if (State.pointInPolygon(cp.x, cp.y, block.points)) { intersects = true; break; } }
       if (!intersects) continue;
-
-      const category = block.category;
-      const name = block.name;
+      const category = block.category, name = block.name;
       const center = State.polygonCenter(block.points);
-
       const midIdx = Math.floor(lineSamples.length / 2);
       const mid = lineSamples[midIdx];
       const prev = lineSamples[Math.max(0, midIdx - 2)];
@@ -1098,28 +920,17 @@ const Tools = (function () {
       const nx = -ty / tlen, ny = tx / tlen;
       const side = (center.x - mid.x) * nx + (center.y - mid.y) * ny;
       const offset = 35;
-      const otherSeed = {
-        x: mid.x + nx * offset * (side >= 0 ? -1 : 1),
-        y: mid.y + ny * offset * (side >= 0 ? -1 : 1),
-      };
-
+      const otherSeed = { x: mid.x + nx * offset * (side >= 0 ? -1 : 1), y: mid.y + ny * offset * (side >= 0 ? -1 : 1) };
       State.removeEntity(block.id, true);
-
       const newPts1 = tryRefillAtWithFallback(center.x, center.y);
-      if (newPts1 && newPts1.length >= 3) {
-        State.addEntity({ type: 'block', category, name, points: newPts1 }, true);
-      }
+      if (newPts1 && newPts1.length >= 3) State.addEntity({ type: 'block', category, name, points: newPts1 }, true);
       const newPts2 = tryRefillAtWithFallback(otherSeed.x, otherSeed.y);
       if (newPts2 && newPts2.length >= 3) {
         const c2 = State.polygonCenter(newPts2);
         const currentBlocks = State.project.entities.filter(e => e.type === 'block' && e.points);
         let alreadyExists = false;
-        for (const blk of currentBlocks) {
-          if (State.pointInPolygon(c2.x, c2.y, blk.points)) { alreadyExists = true; break; }
-        }
-        if (!alreadyExists) {
-          State.addEntity({ type: 'block', category, name, points: newPts2 }, true);
-        }
+        for (const blk of currentBlocks) { if (State.pointInPolygon(c2.x, c2.y, blk.points)) { alreadyExists = true; break; } }
+        if (!alreadyExists) State.addEntity({ type: 'block', category, name, points: newPts2 }, true);
       }
       splitCount++;
     }
