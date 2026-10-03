@@ -1,10 +1,11 @@
 /**
- * config.js — 全局配置常量 v1.2.1
+ * config.js — 全局配置常量 v1.3.0
+ * 道路多层渲染参数、用地分类（GB 50137-2011）、铁路/地铁配置、高饱和规划图色卡
  */
 'use strict';
 
 const CONFIG = {
-  version: 'v1.2.1',
+  version: 'v1.3.0',
   cadFont: '"Courier New","Consolas","Liberation Mono",monospace',
   fangSong: '"FangSong","仿宋","STFangsong","SimSun",serif',
   kaiti: '"FZKaiTi","方正楷体","KaiTi","楷体","STKaiti","SimKai","SimSun",serif',
@@ -32,6 +33,21 @@ const CONFIG = {
   },
   roadLevelOrder:['expressway','arterial','collector','local','ramp'],
   redDashPattern:[6,2,1,2],
+  railwayLevels: {
+    trunk:{name:'干线铁路',width:14,color:'#1a1a1a',tieSpacing:16},
+    intercity:{name:'城际铁路',width:11,color:'#2a2a2a',tieSpacing:14},
+    siding:{name:'专用线',width:8,color:'#444',tieSpacing:12},
+  },
+  railwayLevelOrder:['trunk','intercity','siding'],
+  metroLines:[
+    {id:'M1',name:'1号线',color:'#e60012'},{id:'M2',name:'2号线',color:'#009b3a'},
+    {id:'M3',name:'3号线',color:'#ffd100'},{id:'M4',name:'4号线',color:'#0066b3'},
+    {id:'M5',name:'5号线',color:'#a05eb5'},{id:'M6',name:'6号线',color:'#ff7f00'},
+    {id:'M7',name:'7号线',color:'#00a0e9'},{id:'M8',name:'8号线',color:'#8fc31f'},
+    {id:'M9',name:'9号线',color:'#9d5b2b'},{id:'M10',name:'10号线',color:'#009999'},
+  ],
+  metroWidth:9,
+  metroStationRadius:4,
   landUse: {
     R:{name:'居住用地',color:'#ffee00',sub:{R1:'一类居住用地',R2:'二类居住用地',R3:'三类居住用地'}},
     A:{name:'公共管理与公共服务',color:'#f8a4a4',sub:{A1:'行政办公用地',A2:'文化设施用地',A3:'教育科研用地',A31:'高等院校用地',A32:'中等专业学校用地',A33:'中小学用地',A35:'科研用地',A4:'体育用地',A5:'医疗卫生用地',A51:'医院用地',A6:'社会福利用地',A7:'文物古迹用地'}},

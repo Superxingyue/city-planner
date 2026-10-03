@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>架空城市规划设计器 v1.2.1</title>
+<title>架空城市规划设计器 v1.3.0</title>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -29,6 +29,11 @@
         <button class="tool-btn" data-tool="road-bezier" title="道路-贝塞尔曲线 (B)"><span class="tool-icon">∿</span><span class="tool-label">贝塞尔路</span></button>
         <button class="tool-btn" data-tool="road-polyline" title="道路-折线 (L)"><span class="tool-icon">╱</span><span class="tool-label">折线路</span></button>
         <button class="tool-btn" data-tool="road-ramp" title="匝道 (M)"><span class="tool-icon">⌒</span><span class="tool-label">匝道</span></button>
+      </div>
+      <div class="tool-divider"></div>
+      <div class="tool-section">
+        <button class="tool-btn" data-tool="railway" title="铁路 (N)"><span class="tool-icon">═</span><span class="tool-label">铁路</span></button>
+        <button class="tool-btn" data-tool="metro" title="地铁/轨道交通 (U)"><span class="tool-icon">◉</span><span class="tool-label">地铁</span></button>
       </div>
       <div class="tool-divider"></div>
       <div class="tool-section">
@@ -89,7 +94,7 @@
     <span id="statusScale">1px = 5.00m</span>
     <span class="spacer"></span>
     <span id="statusTool">工具: 选择/编辑</span>
-    <span id="statusVersion" style="opacity:0.5;margin-left:12px;">v1.2.1</span>
+    <span id="statusVersion" style="opacity:0.5;margin-left:12px;">v1.3.0</span>
   </footer>
   <input type="file" id="basemapInput" accept="image/*" style="display:none">
   <input type="file" id="projectInput" accept=".json" style="display:none">
